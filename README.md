@@ -20,8 +20,9 @@ by assigned pawns. *List order is role order*: first weapon = the main (sets SS 
 ranged / preferred melee and combat mode), the rest are backups. Weapons removed from the
 loadout are forgotten again — but only if the projection added them; manually remembered
 weapons are never touched (tracked per-def in a small saved component). Player overrides of
-default/preferred/mode always stick. Generic slots ("any ranged weapon") are ignored —
-those are hauling semantics.
+default/preferred/mode always stick. Generic slots ("any ranged weapon") and multi-count
+weapon slots (trade stock) are ignored — those are hauling/cargo semantics; kit declaration
+is a single copy of a specific def.
 
 **Ammo sustainment** — rides CE's own per-loadout **"Ad hoc"** checkbox. Vanilla CE uses it
 to auto-supply ammo for the *equipped primary* only; with this mod it extends to every
