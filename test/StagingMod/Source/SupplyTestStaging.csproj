@@ -12,6 +12,7 @@
         <GenerateDependencyFile>false</GenerateDependencyFile>
         <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
         <RimWorldWorkshopDir Condition="'$(RimWorldWorkshopDir)' == ''">$(HOME)/.local/share/Steam/steamapps/workshop/content/294100</RimWorldWorkshopDir>
+        <SupplyModDir Condition="'$(SupplyModDir)' == ''">$(MSBuildProjectDirectory)/../../..</SupplyModDir>
     </PropertyGroup>
 
     <ItemGroup>
@@ -27,6 +28,10 @@
         </Reference>
         <Reference Include="SimpleSidearms">
             <HintPath>$(RimWorldWorkshopDir)/927155256/v1.6/Assemblies/SimpleSidearms.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="CESidearmsSupply">
+            <HintPath>$(SupplyModDir)/Assemblies/CESidearmsSupply.dll</HintPath>
             <Private>false</Private>
         </Reference>
         <Publicize Include="CombatExtended" />

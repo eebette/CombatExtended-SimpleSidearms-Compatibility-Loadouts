@@ -23,15 +23,19 @@ weapons are never touched (tracked per-def in a small saved component). Player o
 default/preferred/mode always stick. Generic slots ("any ranged weapon") are ignored —
 those are hauling semantics.
 
-**Ammo sustainment** — every remembered weapon (including the primary) derives spare-magazine
-ammo demand into the pawn's loadout evaluation, injected at `Loadout.GetSlotsFor` — the same
-point CE's fetch *and* excess-drop logic consume, and where CE itself already synthesizes
-ad-hoc ammo slots. Hand-added caliber rows (or matching generics) in the loadout suppress
-the derived demand for that ammo def: explicit beats derived. Stateless — recomputed from
-memory every evaluation.
+**Ammo sustainment** — weapons *declared in the loadout* derive spare-magazine ammo demand
+into the pawn's loadout evaluation, injected at `Loadout.GetSlotsFor` — the same point CE's
+fetch *and* excess-drop logic consume, and where CE itself already synthesizes ad-hoc ammo
+slots. This respects CE's curated-loadout contract (absence of ammo rows is intent):
+derivation only *completes* an explicit weapon declaration, mirroring CE's own
+weapon-implies-ammo inference for ad-hoc loadouts. Hand-added caliber rows (or matching
+generics) suppress the derived demand per ammo def: explicit beats derived. An opt-in
+setting extends derivation to ALL remembered weapons (battlefield pickups included) for
+full-automation players. Stateless — recomputed every evaluation.
 
-**Weapon refetch** — a remembered weapon that goes missing becomes a virtual loadout slot,
-so CE's normal fetch machinery replaces it.
+**Weapon refetch** — loadout-declared weapons refetch natively through their real slots.
+An opt-in setting extends this to manually remembered weapons: when one goes missing it
+becomes a virtual loadout slot, and CE's normal fetch machinery replaces it.
 
 ## Building
 

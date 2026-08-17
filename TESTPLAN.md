@@ -24,19 +24,27 @@ plus some FMJ rifle ammo rows. Assign loadout.
 
 ## Ammo sustainment
 
-- Same colonist: without any hand-added caliber rows, pawn fetches spare mags for every
-  remembered gun (default 2 mags each; check Gear tab counts ≈ magSize × 2 per caliber).
-- Add an explicit 7.62 row with a custom count → derived demand for that caliber disappears;
-  pawn carries exactly the explicit count. Other calibers still auto-derived.
-- Excess-drop check: pawn carrying auto-derived ammo does NOT drop it during loadout
-  enforcement (virtual slots feed GetExcessThing too).
+Scope rule (the curated-loadout contract): ammo derives ONLY for weapons declared in the
+loadout (doctrine), completing that declaration. Incidental/manual memories derive nothing
+unless the "ammo for ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
+
+- Same colonist: pawn fetches spare mags for the four LOADOUT-DECLARED guns (default 2 mags
+  each; Gear tab counts ≈ magSize × 2 per caliber) — except the sniper caliber, whose
+  explicit row of 10 must suppress derivation: exactly 10 carried.
+- Manually remember an extra gun via gizmo (not in loadout) → NO derived ammo for it. Flip
+  "Ammo for ALL remembered weapons" on → its demand appears next Rearm.
+- Excess-drop check: pawn carrying derived ammo does NOT drop it during loadout enforcement
+  (virtual slots feed GetExcessThing too).
 - CE ammo system disabled in CE settings → no derived ammo demand, no errors.
 
-## Weapon refetch
+## Weapon refetch (opt-in; staging enables "Refetch ALL remembered" in this profile)
 
-- Drop the pistol via gizmo-forced drop or destroy it → pawn (or hauler-free pawn itself)
-  fetches a replacement pistol from stockpile via normal loadout job. Verify no fetch loop
-  when no pistol exists on the map (job simply not generated).
+- SUPPLY-2: both pawns remember an uncarried pistol; pistols in a pile. Fetchy-Loadout
+  (assigned empty loadout) must fetch one. Fetchy-Default (default loadout) reveals whether
+  CE evaluates default-loadout pawns at all — record the outcome either way.
+- Loadout-declared weapons refetch natively via their real slots (covered by doctrine test).
+- Toggle "Refetch ALL remembered" off → no fetch jobs for manual memories.
+- Verify no fetch loop when no pistol exists on the map (job simply not generated).
 
 ## Regression
 

@@ -26,8 +26,9 @@ namespace CESidearmsSupply.Patches
         [HarmonyPostfix]
         public static void Postfix(Pawn pawn, ref IEnumerable<LoadoutSlot> __result)
         {
+            SupplySettings s = SupplyMod.Settings;
             if (pawn == null || !pawn.IsColonist
-                || (!SupplyMod.Settings.ammoResupply && !SupplyMod.Settings.weaponRefetch))
+                || (!s.ammoForDoctrine && !s.ammoForAllRemembered && !s.refetchAllRemembered))
             {
                 return;
             }
@@ -59,6 +60,12 @@ namespace CESidearmsSupply.Patches
 
             List<ThingWithComps> carried = pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true).ToList();
             var ammoDemand = new Dictionary<ThingDef, int>();
+            SupplySettings settings = SupplyMod.Settings;
+            // Doctrine-declared defs (template-sourced memories). Curated-loadout contract:
+            // absence of ammo rows is intent — we only derive ammo for weapons the player
+            // explicitly declared (completing that declaration), or for everything when the
+            // full-automation opt-in is on.
+            HashSet<ThingDef> doctrineDefs = SupplyGameComponent.Instance?.GetRecord(pawn, create: false)?.weapons;
 
             foreach (ThingDefStuffDefPair pair in memory.RememberedWeapons.Distinct())
             {
@@ -69,12 +76,16 @@ namespace CESidearmsSupply.Patches
                 }
                 ThingWithComps carriedInstance = carried.FirstOrDefault(w => w.def == weaponDef);
 
-                if (SupplyMod.Settings.weaponRefetch && carriedInstance == null && !Covered(weaponDef))
+                // Doctrine weapons live in real loadout slots and refetch natively; the
+                // virtual refetch path is the opt-in extension for manual memories.
+                if (settings.refetchAllRemembered && carriedInstance == null && !Covered(weaponDef))
                 {
                     result.Add(new LoadoutSlot(weaponDef, 1));
                 }
 
-                if (!SupplyMod.Settings.ammoResupply)
+                bool ammoEligible = settings.ammoForAllRemembered
+                    || (settings.ammoForDoctrine && doctrineDefs != null && doctrineDefs.Contains(weaponDef));
+                if (!ammoEligible)
                 {
                     continue;
                 }

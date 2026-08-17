@@ -54,6 +54,10 @@ namespace CESupplyTestStaging
             anchor = ComputeAnchor(map);
             Log.Message($"[SupplyStaging] Map {map.Size}, staging anchor {anchor}.");
 
+            // SUPPLY-2 exercises the opt-in refetch path; flip it on in this profile.
+            CESidearmsSupply.SupplyMod.Settings.refetchAllRemembered = true;
+            LoadedModManager.GetMod<CESidearmsSupply.SupplyMod>()?.WriteSettings();
+
             Stage1_Doctrine(map);
             SaveAndReset("SUPPLY-1-doctrine");
             Stage2_Refetch(map);
