@@ -53,8 +53,10 @@ namespace CESidearmsSupply.Patches
             }
 
             Loadout loadout = pawn.GetLoadout();
+            // count == 1 only: a multi-count weapon slot is cargo semantics (trade stock,
+            // hauling), not kit declaration — remembering it would corrupt auto-switching.
             List<ThingDef> templateDefs = loadout != null && !loadout.defaultLoadout
-                ? loadout.Slots.Where(s => s.thingDef != null && s.thingDef.IsWeapon)
+                ? loadout.Slots.Where(s => s.thingDef != null && s.thingDef.IsWeapon && s.count == 1)
                           .Select(s => s.thingDef).Distinct().ToList()
                 : new List<ThingDef>();
 
