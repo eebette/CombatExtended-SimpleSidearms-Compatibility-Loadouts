@@ -1,7 +1,31 @@
-# Manual test plan — Sidearms & Supply
+# Test plan — Sidearms & Supply
 
-Uses the compat patch's harness (`../CombatExtended-SimpleSidearms Compatibility Patch/test/run-test.sh`);
-this mod is included in that profile's modlist. Iterate: edit → build → relaunch → load save.
+**Most of this plan is automated.** `test/run-supply-assert.sh <scenario> <save>` loads a
+staged save and runs in-game assertions (`test/StagingMod/Source/SupplyTestRunner.cs`),
+writing `test-results-<scenario>.json` into the shared profile, then self-exits:
+
+```
+./test/run-supply-stage.sh                                  # regenerate SUPPLY saves (quit after letter)
+./test/run-supply-assert.sh supply1 SUPPLY-1-loadout-sidearms
+./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
+```
+
+`supply1` covers, in phases: initial reconcile + physical fetch (memory contents, roles,
+mode, gladius stuff fix-up, ammo counts incl. explicit-row suppression), reorder→role
+flip, manual role override sticking, template forget, manual-memory protection through
+template churn, Ad hoc untick parity (stream + physical drop), Ad hoc re-tick, and the
+ammo-for-all-remembered opt-in. `supply2` covers memory-only refetch. Full pass recorded
+2026-08-17 (supply1 8/8 phases, supply2 pass, no log errors).
+
+**SUPPLY-2 open question answered (2026-08-17 run): CE DOES evaluate default-loadout
+pawns — Fetchy-Default fetched the pistol too.** Refetch reaches pawns with no assigned
+loadout.
+
+Remaining MANUAL checks (visual/config-level, not covered by the runner): SS gizmo
+rendering of remembered weapons; "CE ammo system disabled" settings run; save/load
+mid-state persistence; removing-the-mod-mid-save leaves only inert SS data. Manual
+loop: `../CombatExtended-SimpleSidearms Compatibility Patch/test/run-test.sh`, load a
+SUPPLY save, unpause.
 
 ## Loadout weapons as sidearms
 
