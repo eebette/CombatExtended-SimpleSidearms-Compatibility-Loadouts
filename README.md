@@ -1,5 +1,8 @@
 # CombatExtended-SimpleSidearms Compatibility Module - Loadouts
 
+[![Combat Extended Compatible](Media/Badge_CE_compatible.png)](https://steamcommunity.com/sharedfiles/filedetails/?id=2890901044)
+![CE + Simple Sidearms Compatibility Suite](Media/Badge_Suite.png)
+
 RimWorld 1.6 mod unifying [Combat Extended](https://github.com/CombatExtended-Continued/CombatExtended)
 loadouts and [Simple Sidearms](https://github.com/PeteTimesSix/SimpleSidearms) memory into one
 mental model. Builds on (and requires) the
