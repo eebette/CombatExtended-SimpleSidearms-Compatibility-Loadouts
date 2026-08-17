@@ -9,13 +9,20 @@ using Verse;
 namespace CESidearmsSupply.Patches
 {
     /// <summary>
-    /// Kit sustainment: every SS-remembered weapon derives virtual loadout demand —
-    /// spare-magazine ammo, and a refetch slot when the weapon itself is missing.
-    /// Injected into Loadout.GetSlotsFor, the single choke point CE's fetch AND
-    /// excess-drop logic both consume (and where CE itself already synthesizes ad-hoc
-    /// ammo slots, so this extends an existing idiom). Explicit beats derived: any
-    /// real or CE-generated slot for the same def suppresses the virtual one.
-    /// Stateless — recomputed from memory, nothing to desync.
+    /// Ammo/refetch demand adapter. SS has no logistics — it never fetches or hauls;
+    /// CE's loadout evaluator is the only engine for that, and LoadoutSlots are its
+    /// input language. This postfix translates derived needs into that language at
+    /// Loadout.GetSlotsFor, the single choke point CE's fetch AND excess-drop logic
+    /// both consume (and where CE itself synthesizes its ad-hoc ammo slots).
+    ///
+    /// Scope: ammo derives for weapons DECLARED in the loadout when its "Ad hoc"
+    /// checkbox is ticked (at the loadout's adHocMags), or for all remembered weapons
+    /// under the off-by-default full-automation setting. Refetch slots exist only for
+    /// MISSING weapons under the off-by-default opt-in — a carried weapon never gains
+    /// keep-protection from here (drop exemption for remembered weapons is the compat
+    /// patch's axis 10, and it ends when the memory is forgotten). Explicit beats
+    /// derived: any real or CE-generated slot for the same def suppresses the virtual
+    /// one. Stateless — recomputed from memory, nothing to desync.
     /// </summary>
     [HarmonyPatch(typeof(Loadout), nameof(Loadout.GetSlotsFor))]
     public static class Loadout_GetSlotsFor_Patch
