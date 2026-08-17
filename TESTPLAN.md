@@ -8,9 +8,12 @@ this mod is included in that profile's modlist. Iterate: edit → build → rela
 Stage: colonist, fresh CE loadout containing (in list order): sniper, shotgun, pistol, gladius,
 plus some FMJ rifle ammo rows. Assign loadout.
 
-- Within one loadout evaluation (~few in-game minutes; force with draft-toggle), the SS gizmo
-  shows all four weapons remembered; default ranged = sniper; preferred melee = gladius;
-  combat mode = ranged (only if it was BySkill before — a hand-set mode must survive).
+- Within one loadout evaluation — CE throttles these to one per 1800 ticks (30s real time
+  at 1x) per pawn, run at the pawn's next job selection; the Assign tab's loadout-column
+  button ("update now"/Rearm) triggers it instantly and is the fastest test lever — the SS
+  gizmo shows all four weapons remembered; default ranged = sniper; preferred melee =
+  gladius; combat mode = ranged (only if it was BySkill before — a hand-set mode must
+  survive).
 - Reorder shotgun to top → default ranged flips to shotgun on next reconcile.
 - Manually set pistol as default ranged via gizmo → reorder loadout again → pistol stays
   default (player override sticks).
