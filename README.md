@@ -23,15 +23,16 @@ weapons are never touched (tracked per-def in a small saved component). Player o
 default/preferred/mode always stick. Generic slots ("any ranged weapon") are ignored —
 those are hauling semantics.
 
-**Ammo sustainment** — weapons *declared in the loadout* derive spare-magazine ammo demand
-into the pawn's loadout evaluation, injected at `Loadout.GetSlotsFor` — the same point CE's
-fetch *and* excess-drop logic consume, and where CE itself already synthesizes ad-hoc ammo
-slots. This respects CE's curated-loadout contract (absence of ammo rows is intent):
-derivation only *completes* an explicit weapon declaration, mirroring CE's own
-weapon-implies-ammo inference for ad-hoc loadouts. Hand-added caliber rows (or matching
-generics) suppress the derived demand per ammo def: explicit beats derived. An opt-in
-setting extends derivation to ALL remembered weapons (battlefield pickups included) for
-full-automation players. Stateless — recomputed every evaluation.
+**Ammo sustainment** — rides CE's own per-loadout **"Ad hoc"** checkbox. Vanilla CE uses it
+to auto-supply ammo for the *equipped primary* only; with this mod it extends to every
+weapon *declared in that loadout*, at the loadout's own magazine count. Unticked, behavior
+is exactly vanilla CE's curated contract: no ammo rows means no ammo and no demand.
+Derived slots are injected at `Loadout.GetSlotsFor` — the same point CE's fetch *and*
+excess-drop logic consume, and where CE synthesizes its own ad-hoc slots (deduped against
+ours). Hand-added caliber rows (or matching generics) suppress derived demand per ammo def:
+explicit beats derived. A separate off-by-default setting extends derivation to ALL
+remembered weapons (battlefield pickups included) for full-automation players, at a global
+spare-magazine count. Stateless — recomputed every evaluation.
 
 **Weapon refetch** — loadout-declared weapons refetch natively through their real slots.
 An opt-in setting extends this to manually remembered weapons: when one goes missing it

@@ -24,15 +24,20 @@ plus some FMJ rifle ammo rows. Assign loadout.
 
 ## Ammo sustainment
 
-Scope rule (the curated-loadout contract): ammo derives ONLY for weapons declared in the
-loadout (doctrine), completing that declaration. Incidental/manual memories derive nothing
-unless the "ammo for ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
+Scope rule: ammo derivation rides CE's own per-loadout "Ad hoc" checkbox (vanilla CE uses
+it to auto-supply the equipped primary; mod 2 extends it to every weapon DECLARED in that
+loadout, at the loadout's mags count). Ad hoc unticked = pure CE curated contract: weapons
+carried, no ammo, no demand. Incidental/manual memories derive nothing unless the "ammo for
+ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 
-- Same colonist: pawn fetches spare mags for the four LOADOUT-DECLARED guns (default 2 mags
-  each; Gear tab counts ≈ magSize × 2 per caliber) — except the sniper caliber, whose
+- The staged loadout has Ad hoc ticked, mags = 2: pawn fetches mags for the LOADOUT-DECLARED
+  guns (Gear tab counts ≈ magSize × 2 per caliber) — except the sniper caliber, whose
   explicit row of 10 must suppress derivation: exactly 10 carried.
-- Manually remember an extra gun via gizmo (not in loadout) → NO derived ammo for it. Flip
-  "Ammo for ALL remembered weapons" on → its demand appears next Rearm.
+- UNTICK Ad hoc in the loadout dialog → Rearm → derived demand gone; pawn drops the derived
+  ammo (pure-CE parity check). Re-tick → demand returns.
+- Manually remember an extra gun via gizmo (not in loadout) → NO derived ammo for it even
+  with Ad hoc on. Flip "Ammo for ALL remembered weapons" on → its demand appears next Rearm
+  (at the global spare-magazines count, not the loadout's).
 - Excess-drop check: pawn carrying derived ammo does NOT drop it during loadout enforcement
   (virtual slots feed GetExcessThing too).
 - CE ammo system disabled in CE settings → no derived ammo demand, no errors.

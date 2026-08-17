@@ -24,20 +24,20 @@ namespace CESidearmsSupply.Patches
             = new Dictionary<Pawn, (int, List<LoadoutSlot>)>();
 
         [HarmonyPostfix]
-        public static void Postfix(Pawn pawn, ref IEnumerable<LoadoutSlot> __result)
+        public static void Postfix(Loadout __instance, Pawn pawn, ref IEnumerable<LoadoutSlot> __result)
         {
             SupplySettings s = SupplyMod.Settings;
             if (pawn == null || !pawn.IsColonist
-                || (!s.ammoForDoctrine && !s.ammoForAllRemembered && !s.refetchAllRemembered))
+                || (!__instance.adHoc && !s.ammoForAllRemembered && !s.refetchAllRemembered))
             {
                 return;
             }
             List<LoadoutSlot> baseSlots = __result.ToList();
-            List<LoadoutSlot> virtuals = VirtualSlotsFor(pawn, baseSlots);
+            List<LoadoutSlot> virtuals = VirtualSlotsFor(__instance, pawn, baseSlots);
             __result = virtuals.Count == 0 ? baseSlots : baseSlots.Concat(virtuals);
         }
 
-        private static List<LoadoutSlot> VirtualSlotsFor(Pawn pawn, List<LoadoutSlot> baseSlots)
+        private static List<LoadoutSlot> VirtualSlotsFor(Loadout loadout, Pawn pawn, List<LoadoutSlot> baseSlots)
         {
             int tick = Find.TickManager?.TicksGame ?? 0;
             if (cache.TryGetValue(pawn, out var cached) && cached.tick == tick)
@@ -61,11 +61,14 @@ namespace CESidearmsSupply.Patches
             List<ThingWithComps> carried = pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true).ToList();
             var ammoDemand = new Dictionary<ThingDef, int>();
             SupplySettings settings = SupplyMod.Settings;
-            // Doctrine-declared defs (template-sourced memories). Curated-loadout contract:
-            // absence of ammo rows is intent — we only derive ammo for weapons the player
-            // explicitly declared (completing that declaration), or for everything when the
-            // full-automation opt-in is on.
-            HashSet<ThingDef> doctrineDefs = SupplyGameComponent.Instance?.GetRecord(pawn, create: false)?.weapons;
+            // Ammo derivation rides CE's own per-loadout "Ad hoc" opt-in (which vanilla CE
+            // uses to auto-supply the equipped primary): with it ticked, derivation extends
+            // to every weapon DECLARED in this loadout, at the loadout's adHocMags count.
+            // Unticked = pure CE curated contract: no ammo rows, no ammo, no demand.
+            // The full-automation setting extends derivation to all remembered weapons.
+            HashSet<ThingDef> doctrineDefs = loadout.adHoc
+                ? SupplyGameComponent.Instance?.GetRecord(pawn, create: false)?.weapons
+                : null;
 
             foreach (ThingDefStuffDefPair pair in memory.RememberedWeapons.Distinct())
             {
@@ -83,12 +86,12 @@ namespace CESidearmsSupply.Patches
                     result.Add(new LoadoutSlot(weaponDef, 1));
                 }
 
-                bool ammoEligible = settings.ammoForAllRemembered
-                    || (settings.ammoForDoctrine && doctrineDefs != null && doctrineDefs.Contains(weaponDef));
-                if (!ammoEligible)
+                bool viaDoctrine = doctrineDefs != null && doctrineDefs.Contains(weaponDef);
+                if (!viaDoctrine && !settings.ammoForAllRemembered)
                 {
                     continue;
                 }
+                int magazines = viaDoctrine ? loadout.adHocMags : settings.spareMagazines;
                 var props = weaponDef.GetCompProperties<CompProperties_AmmoUser>();
                 if (props?.ammoSet?.ammoTypes == null || props.ammoSet.ammoTypes.Count == 0)
                 {
@@ -106,7 +109,7 @@ namespace CESidearmsSupply.Patches
                 }
                 int perMag = props.AmmoGenPerMagOverride > 0 ? props.AmmoGenPerMagOverride
                              : props.magazineSize > 0 ? props.magazineSize : 25;
-                int count = perMag * SupplyMod.Settings.spareMagazines;
+                int count = perMag * magazines;
                 if (count <= 0)
                 {
                     continue;

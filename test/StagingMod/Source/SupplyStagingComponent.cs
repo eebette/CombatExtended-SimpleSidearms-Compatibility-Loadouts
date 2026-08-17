@@ -103,6 +103,8 @@ namespace CESupplyTestStaging
             }
 
             var loadout = new Loadout("SUPPLY doctrine test");
+            loadout.adHoc = true;    // CE's own weapon-implies-ammo opt-in; extended by mod 2 to declared weapons
+            loadout.adHocMags = 2;
             loadout.AddSlot(new LoadoutSlot(sniper, 1));
             loadout.AddSlot(new LoadoutSlot(shotgun, 1));
             loadout.AddSlot(new LoadoutSlot(pistol, 1));
