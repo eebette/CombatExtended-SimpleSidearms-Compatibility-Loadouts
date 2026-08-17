@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+    <name>Sidearms &amp; Supply Test Staging</name>
+    <author>eebette</author>
+    <packageId>eebette.CESupplyTestStaging</packageId>
+    <supportedVersions>
+        <li>1.6</li>
+    </supportedVersions>
+    <description>Dev-only helper: builds staged SUPPLY-* saves for Sidearms &amp; Supply when the game is launched with -quicktest -cesupplystage. Inert otherwise. Not for normal play.</description>
+    <modDependencies>
+        <li>
+            <packageId>CETeam.CombatExtended</packageId>
+            <displayName>Combat Extended</displayName>
+            <steamWorkshopUrl>steam://url/CommunityFilePage/2890901044</steamWorkshopUrl>
+        </li>
+        <li>
+            <packageId>PeteTimesSix.SimpleSidearms</packageId>
+            <displayName>Simple Sidearms</displayName>
+            <steamWorkshopUrl>steam://url/CommunityFilePage/927155256</steamWorkshopUrl>
+        </li>
+        <li>
+            <packageId>eebette.CESidearmsSupply</packageId>
+            <displayName>Sidearms &amp; Supply for CE</displayName>
+            <downloadUrl>https://github.com/eebette/CESidearmsSupply</downloadUrl>
+        </li>
+    </modDependencies>
+    <loadAfter>
+        <li>eebette.CESidearmsSupply</li>
+    </loadAfter>
+</ModMetaData>
