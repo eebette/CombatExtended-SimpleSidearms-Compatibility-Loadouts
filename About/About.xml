@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetaData>
-    <name>Sidearms &amp; Supply for CE</name>
+    <name>CombatExtended-SimpleSidearms Compatibility Module - Loadouts</name>
     <author>eebette</author>
-    <packageId>eebette.CESidearmsSupply</packageId>
+    <packageId>eebette.CESimpleSidearmsCompat.Loadouts</packageId>
     <supportedVersions>
         <li>1.6</li>
     </supportedVersions>
@@ -31,8 +31,8 @@ Requires the Combat Extended + Simple Sidearms Compatibility patch.</description
         </li>
         <li>
             <packageId>eebette.CESimpleSidearmsCompat</packageId>
-            <displayName>Combat Extended + Simple Sidearms Compatibility</displayName>
-            <downloadUrl>https://github.com/eebette/CESimpleSidearmsCompat</downloadUrl>
+            <displayName>CombatExtended-SimpleSidearms Compatibility Patch</displayName>
+            <downloadUrl>https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch</downloadUrl>
         </li>
     </modDependencies>
     <loadAfter>

@@ -1,9 +1,9 @@
-# Sidearms & Supply for CE
+# CombatExtended-SimpleSidearms Compatibility Module - Loadouts
 
 RimWorld 1.6 mod unifying [Combat Extended](https://github.com/CombatExtended-Continued/CombatExtended)
 loadouts and [Simple Sidearms](https://github.com/PeteTimesSix/SimpleSidearms) memory into one
 mental model. Builds on (and requires) the
-[CE + Simple Sidearms Compatibility patch](https://github.com/eebette/CESimpleSidearmsCompat).
+[CE + Simple Sidearms Compatibility patch](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch).
 
 ## The model
 

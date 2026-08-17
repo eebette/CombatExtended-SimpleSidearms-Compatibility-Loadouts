@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetaData>
-    <name>Sidearms &amp; Supply Test Staging</name>
+    <name>CombatExtended-SimpleSidearms Loadouts Test Staging</name>
     <author>eebette</author>
     <packageId>eebette.CESupplyTestStaging</packageId>
     <supportedVersions>
         <li>1.6</li>
     </supportedVersions>
-    <description>Dev-only helper: builds staged SUPPLY-* saves for Sidearms &amp; Supply when the game is launched with -quicktest -cesupplystage. Inert otherwise. Not for normal play.</description>
+    <description>Dev-only helper: builds staged SUPPLY-* saves for the Loadouts module when the game is launched with -quicktest -cesupplystage. Inert otherwise. Not for normal play.</description>
     <modDependencies>
         <li>
             <packageId>CETeam.CombatExtended</packageId>
@@ -19,12 +19,12 @@
             <steamWorkshopUrl>steam://url/CommunityFilePage/927155256</steamWorkshopUrl>
         </li>
         <li>
-            <packageId>eebette.CESidearmsSupply</packageId>
-            <displayName>Sidearms &amp; Supply for CE</displayName>
-            <downloadUrl>https://github.com/eebette/CESidearmsSupply</downloadUrl>
+            <packageId>eebette.CESimpleSidearmsCompat.Loadouts</packageId>
+            <displayName>CombatExtended-SimpleSidearms Compatibility Module - Loadouts</displayName>
+            <downloadUrl>https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Loadouts</downloadUrl>
         </li>
     </modDependencies>
     <loadAfter>
-        <li>eebette.CESidearmsSupply</li>
+        <li>eebette.CESimpleSidearmsCompat.Loadouts</li>
     </loadAfter>
 </ModMetaData>
