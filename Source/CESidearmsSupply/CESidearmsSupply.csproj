@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net48</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>disable</Nullable>
+        <AssemblyName>CESidearmsSupply</AssemblyName>
+        <RootNamespace>CESidearmsSupply</RootNamespace>
+        <OutputPath>..\..\Assemblies\</OutputPath>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <DebugType>none</DebugType>
+        <GenerateDependencyFile>false</GenerateDependencyFile>
+        <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+        <RimWorldWorkshopDir Condition="'$(RimWorldWorkshopDir)' == ''">$(HOME)/.local/share/Steam/steamapps/workshop/content/294100</RimWorldWorkshopDir>
+        <CompatModDir Condition="'$(CompatModDir)' == ''">$(HOME)/Projects/CombatExtended-SimpleSidearms Compatibility Patch</CompatModDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+        <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.*" />
+        <PackageReference Include="Lib.Harmony" Version="2.3.3" ExcludeAssets="runtime" />
+        <PackageReference Include="Krafs.Publicizer" Version="2.3.0" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Reference Include="CombatExtended">
+            <HintPath>$(RimWorldWorkshopDir)/2890901044/Assemblies/CombatExtended.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="SimpleSidearms">
+            <HintPath>$(RimWorldWorkshopDir)/927155256/v1.6/Assemblies/SimpleSidearms.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="CESimpleSidearmsCompat">
+            <HintPath>$(CompatModDir)/Assemblies/CESimpleSidearmsCompat.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Publicize Include="CombatExtended" />
+        <Publicize Include="SimpleSidearms" />
+    </ItemGroup>
+
+</Project>

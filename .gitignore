@@ -1,0 +1,7 @@
+### .NET ###
+obj/
+*.user
+
+### JetBrains ###
+.idea/
+*.iml
