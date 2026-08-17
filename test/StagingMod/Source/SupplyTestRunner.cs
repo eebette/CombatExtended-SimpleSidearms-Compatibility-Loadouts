@@ -27,6 +27,13 @@ namespace CESupplyTestStaging
     {
         static TestBoot()
         {
+            // Scenario prefix routing: this runner owns "supply"; the compat patch's
+            // CETestRunner owns "cetest". Both staging mods share the test profile.
+            if (!GenCommandLine.TryGetCommandLineArg("ceassert", out string scenario)
+                || scenario.NullOrEmpty() || !scenario.StartsWith("supply"))
+            {
+                return;
+            }
             if (GenCommandLine.TryGetCommandLineArg("celoadsave", out string save) && !save.NullOrEmpty())
             {
                 LongEventHandler.ExecuteWhenFinished(() =>
@@ -72,7 +79,8 @@ namespace CESupplyTestStaging
 
         public override void LoadedGame()
         {
-            if (!GenCommandLine.TryGetCommandLineArg("ceassert", out scenario) || scenario.NullOrEmpty())
+            if (!GenCommandLine.TryGetCommandLineArg("ceassert", out scenario)
+                || scenario.NullOrEmpty() || !scenario.StartsWith("supply"))
             {
                 return;
             }
