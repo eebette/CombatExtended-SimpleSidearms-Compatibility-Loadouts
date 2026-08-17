@@ -7,7 +7,7 @@ using static PeteTimesSix.SimpleSidearms.Utilities.Enums;
 namespace CESidearmsSupply
 {
     /// <summary>
-    /// Per-pawn record of what the doctrine projection put into SS memory, so template
+    /// Per-pawn record of what loadout-weapons-as-sidearms put into SS memory, so template
     /// changes can take back exactly what they gave and never touch manual memories.
     /// Tracked per-def (stuff fix-ups change pairs; defs are stable).
     /// </summary>

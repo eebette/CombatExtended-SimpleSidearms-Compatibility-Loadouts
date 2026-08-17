@@ -8,7 +8,7 @@
     </supportedVersions>
     <description>Unifies Combat Extended loadouts and Simple Sidearms memory into one mental model.
 
-- Doctrine projection: weapons listed in a CE loadout are automatically remembered as sidearms by assigned pawns. First weapon in the list becomes the main (default ranged / preferred melee); the rest are backups. Remove it from the loadout and it is forgotten again — weapons you remember manually are never touched.
+- Loadout weapons as sidearms: weapons listed in a CE loadout are automatically remembered as sidearms by assigned pawns. First weapon in the list becomes the main (default ranged / preferred melee); the rest are backups. Remove it from the loadout and it is forgotten again — weapons you remember manually are never touched.
 - Ammo sustainment: every remembered weapon automatically generates ammo demand (spare magazines, configurable) in the pawn's loadout evaluation. No more hand-adding calibers. Hand-added caliber rows still override the automation.
 - Weapon refetch: a remembered weapon that goes missing is fetched again like any loadout item.
 

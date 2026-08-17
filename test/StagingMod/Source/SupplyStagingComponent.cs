@@ -58,27 +58,27 @@ namespace CESupplyTestStaging
             CESidearmsSupply.SupplyMod.Settings.refetchAllRemembered = true;
             LoadedModManager.GetMod<CESidearmsSupply.SupplyMod>()?.WriteSettings();
 
-            Stage1_Doctrine(map);
-            SaveAndReset("SUPPLY-1-doctrine");
+            Stage1_LoadoutSidearms(map);
+            SaveAndReset("SUPPLY-1-loadout-sidearms");
             Stage2_Refetch(map);
             SaveAndReset("SUPPLY-2-refetch");
 
             Find.TickManager.Pause();
             Log.Message("[SupplyStaging] All SUPPLY saves created.");
             Find.LetterStack.ReceiveLetter("SUPPLY saves created",
-                "Staged saves written: SUPPLY-1-doctrine, SUPPLY-2-refetch.\n\nQuit to main menu and Load one, then UNPAUSE and watch the reconcile/fetch happen. See TESTPLAN.md.",
+                "Staged saves written: SUPPLY-1-loadout-sidearms, SUPPLY-2-refetch.\n\nQuit to main menu and Load one, then UNPAUSE and watch the reconcile/fetch happen. See TESTPLAN.md.",
                 LetterDefOf.PositiveEvent);
         }
 
         // ---- scenarios -----------------------------------------------------
 
-        // Doctrine projection + ammo sustainment + suppression + stuff fix-up.
+        // Loadout-weapons-as-sidearms + ammo sustainment + suppression + stuff fix-up.
         // Unarmed colonist, loadout listing sniper > shotgun > pistol > gladius,
         // plus one EXPLICIT ammo row (sniper's caliber, odd count 10) that must
         // suppress the derived demand. Weapons and ammo piles on the ground so
         // every fetch can actually complete. Two gladius stuff variants for the
         // pair fix-up check.
-        private void Stage1_Doctrine(Map map)
+        private void Stage1_LoadoutSidearms(Map map)
         {
             Pawn pawn = SpawnColonist(map, "Dockie", new IntVec3(-4, 0, 0));
 
@@ -102,7 +102,7 @@ namespace CESupplyTestStaging
                 }
             }
 
-            var loadout = new Loadout("SUPPLY doctrine test");
+            var loadout = new Loadout("SUPPLY loadout-sidearms test");
             loadout.adHoc = true;    // CE's own weapon-implies-ammo opt-in; extended by mod 2 to declared weapons
             loadout.adHocMags = 2;
             loadout.AddSlot(new LoadoutSlot(sniper, 1));

@@ -12,7 +12,7 @@ using static PeteTimesSix.SimpleSidearms.Utilities.Enums;
 namespace CESidearmsSupply.Patches
 {
     /// <summary>
-    /// Doctrine projection: specific weapon defs listed in the pawn's CE loadout are
+    /// Loadout weapons as sidearms: specific weapon defs listed in the pawn's CE loadout are
     /// remembered as SS sidearms ("the template giveth"); defs removed from the loadout
     /// are forgotten again, but only if the projection added them ("the template taketh
     /// away") — manual memories are never touched. First ranged/melee slot in list order
@@ -25,7 +25,7 @@ namespace CESidearmsSupply.Patches
         [HarmonyPrefix]
         public static void Prefix(Pawn pawn)
         {
-            if (!SupplyMod.Settings.doctrineProjection)
+            if (!SupplyMod.Settings.loadoutWeaponsAsSidearms)
             {
                 return;
             }
@@ -35,7 +35,7 @@ namespace CESidearmsSupply.Patches
             }
             catch (System.Exception e)
             {
-                Log.WarningOnce($"[Sidearms&Supply] Doctrine reconcile failed for {pawn}: {e}", 0x53535231);
+                Log.WarningOnce($"[Sidearms&Supply] Loadout-sidearm reconcile failed for {pawn}: {e}", 0x53535231);
             }
         }
 

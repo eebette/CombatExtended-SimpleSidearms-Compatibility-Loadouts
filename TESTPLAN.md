@@ -3,7 +3,7 @@
 Uses the compat patch's harness (`../CombatExtended-SimpleSidearms Compatibility Patch/test/run-test.sh`);
 this mod is included in that profile's modlist. Iterate: edit → build → relaunch → load save.
 
-## Doctrine projection
+## Loadout weapons as sidearms
 
 Stage: colonist, fresh CE loadout containing (in list order): sniper, shotgun, pistol, gladius,
 plus some FMJ rifle ammo rows. Assign loadout.
@@ -47,7 +47,7 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 - SUPPLY-2: both pawns remember an uncarried pistol; pistols in a pile. Fetchy-Loadout
   (assigned empty loadout) must fetch one. Fetchy-Default (default loadout) reveals whether
   CE evaluates default-loadout pawns at all — record the outcome either way.
-- Loadout-declared weapons refetch natively via their real slots (covered by doctrine test).
+- Loadout-declared weapons refetch natively via their real slots (covered by loadout-sidearms test).
 - Toggle "Refetch ALL remembered" off → no fetch jobs for manual memories.
 - Verify no fetch loop when no pistol exists on the map (job simply not generated).
 

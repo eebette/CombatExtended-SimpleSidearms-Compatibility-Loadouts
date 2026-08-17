@@ -7,15 +7,15 @@ mental model. Builds on (and requires) the
 
 ## The model
 
-- **CE loadout = doctrine layer** (shared template): consumables policy, and weapon slots as
-  doctrine statements.
+- **CE loadout = template layer** (shared template): consumables policy, and weapon slots as
+  kit declarations.
 - **SS sidearm memory = instance layer** (per-pawn working kit): the authority on which
   weapons a pawn maintains.
 - Two one-way derivations connect them; no state can desync, no cycles.
 
 ## Features (each toggleable in mod settings)
 
-**Doctrine projection** — weapon defs listed in a CE loadout are auto-remembered as sidearms
+**Loadout weapons as sidearms** — weapon defs listed in a CE loadout are auto-remembered as sidearms
 by assigned pawns. *List order is role order*: first weapon = the main (sets SS default
 ranged / preferred melee and combat mode), the rest are backups. Weapons removed from the
 loadout are forgotten again — but only if the projection added them; manually remembered

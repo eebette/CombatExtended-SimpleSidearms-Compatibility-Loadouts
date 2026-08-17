@@ -66,7 +66,7 @@ namespace CESidearmsSupply.Patches
             // to every weapon DECLARED in this loadout, at the loadout's adHocMags count.
             // Unticked = pure CE curated contract: no ammo rows, no ammo, no demand.
             // The full-automation setting extends derivation to all remembered weapons.
-            HashSet<ThingDef> doctrineDefs = loadout.adHoc
+            HashSet<ThingDef> loadoutDeclaredDefs = loadout.adHoc
                 ? SupplyGameComponent.Instance?.GetRecord(pawn, create: false)?.weapons
                 : null;
 
@@ -79,19 +79,19 @@ namespace CESidearmsSupply.Patches
                 }
                 ThingWithComps carriedInstance = carried.FirstOrDefault(w => w.def == weaponDef);
 
-                // Doctrine weapons live in real loadout slots and refetch natively; the
+                // Loadout-declared weapons live in real slots and refetch natively; the
                 // virtual refetch path is the opt-in extension for manual memories.
                 if (settings.refetchAllRemembered && carriedInstance == null && !Covered(weaponDef))
                 {
                     result.Add(new LoadoutSlot(weaponDef, 1));
                 }
 
-                bool viaDoctrine = doctrineDefs != null && doctrineDefs.Contains(weaponDef);
-                if (!viaDoctrine && !settings.ammoForAllRemembered)
+                bool viaLoadoutDeclaration = loadoutDeclaredDefs != null && loadoutDeclaredDefs.Contains(weaponDef);
+                if (!viaLoadoutDeclaration && !settings.ammoForAllRemembered)
                 {
                     continue;
                 }
-                int magazines = viaDoctrine ? loadout.adHocMags : settings.spareMagazines;
+                int magazines = viaLoadoutDeclaration ? loadout.adHocMags : settings.spareMagazines;
                 var props = weaponDef.GetCompProperties<CompProperties_AmmoUser>();
                 if (props?.ammoSet?.ammoTypes == null || props.ammoSet.ammoTypes.Count == 0)
                 {
