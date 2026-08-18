@@ -1,0 +1,23 @@
+[url=https://steamcommunity.com/sharedfiles/filedetails/?id=2890901044][img]https://raw.githubusercontent.com/CombatExtended-Continued/CombatExtended/master/Media/Badge_CE_compatible.png[/img][/url] [img]https://raw.githubusercontent.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch/master/Media/Badge_Suite.png[/img] [img]https://raw.githubusercontent.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Loadouts/main/Media/Badge_Loadouts.png[/img]
+
+One mental model for [b]Combat Extended[/b] loadouts and [b]Simple Sidearms[/b] memory. The CE loadout is the shared template; each pawn's SS sidearm memory is the living copy of it.
+
+[h1]What it does[/h1]
+[list]
+[*][b]Loadout weapons become sidearms.[/b] Single-count weapons in a CE loadout are auto-remembered by assigned pawns. First in the list sets the main-weapon role (default ranged / preferred melee); the rest are backups. Remove a weapon from the loadout and it's forgotten — and CE then cleans it out of inventories. Weapons you remember manually through the SS gizmo are never touched.
+[*][b]Ammo for declared weapons.[/b] Rides CE's own per-loadout [i]Ad hoc[/i] checkbox: ticked, CE's primary-weapon ammo automation extends to every weapon declared in that loadout, at the loadout's magazine count. Unticked = exactly vanilla CE. Hand-added caliber rows always beat the automation.
+[*][b]Optional full automation.[/b] Mod settings can extend ammo demand and refetch to ALL remembered weapons, including battlefield pickups. Off by default — incidental pickups shouldn't drain your ammo economy unless you say so.
+[/list]
+
+[h1]Requires[/h1]
+Harmony, Combat Extended, Simple Sidearms, and the [url=https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch]CombatExtended-SimpleSidearms Compatibility Patch[/url] (the core of this suite). Load after all four (auto-sorted).
+
+[h1]Good to know[/h1]
+[list]
+[*]Safe to add mid-save. Removing mid-save leaves only inert SS sidearm memories plus a one-time load warning — no corruption.
+[*]Reconciliation runs on CE's own loadout cadence; the Assign tab's "update now" button applies changes instantly.
+[/list]
+
+[h1]Links & credit[/h1]
+Source, issues, technical docs: [url=https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Loadouts]GitHub[/url]. MIT-licensed.
+Credit to the CE team and PeteTimesSix; emblem art derives from CE's media (CC BY-NC-SA).

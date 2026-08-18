@@ -8,11 +8,11 @@
     </supportedVersions>
     <description>Unifies Combat Extended loadouts and Simple Sidearms memory into one mental model.
 
-- Loadout weapons as sidearms: weapons listed in a CE loadout are automatically remembered as sidearms by assigned pawns. First weapon in the list becomes the main (default ranged / preferred melee); the rest are backups. Remove it from the loadout and it is forgotten again — weapons you remember manually are never touched.
-- Ammo sustainment: every remembered weapon automatically generates ammo demand (spare magazines, configurable) in the pawn's loadout evaluation. No more hand-adding calibers. Hand-added caliber rows still override the automation.
-- Weapon refetch: a remembered weapon that goes missing is fetched again like any loadout item.
+- Loadout weapons as sidearms: single-count weapons listed in a CE loadout are automatically remembered as sidearms by assigned pawns. The first in the list sets the default ranged / preferred melee role; the rest are backups. Remove one from the loadout and it is forgotten again — weapons you remembered manually are never touched.
+- Ammo for declared weapons: rides CE's own per-loadout "Ad hoc" checkbox. Ticked, it extends CE's primary-weapon ammo automation to every weapon declared in that loadout, at the loadout's magazine count. Unticked behaves exactly like vanilla CE. Hand-added caliber rows always win over the automation.
+- Optional full automation: settings can extend ammo demand and refetch to ALL remembered weapons, including battlefield pickups. Off by default.
 
-Requires the Combat Extended + Simple Sidearms Compatibility patch.</description>
+Requires the CombatExtended-SimpleSidearms Compatibility Patch.</description>
     <modDependencies>
         <li>
             <packageId>brrainz.harmony</packageId>
