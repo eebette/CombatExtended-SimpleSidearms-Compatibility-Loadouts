@@ -355,6 +355,25 @@ namespace CESupplyTestStaging
             {
                 label = "initial-reconcile-and-fetch",
                 deadlineTicks = 40000,
+                mutate = () =>
+                {
+                    // Top up needs: a tired/hungry colonist sleeps or eats instead of
+                    // hauling, and CE's loadout fetch is low-priority enough that an
+                    // unlucky spawn can burn the whole deadline resting (seen as an
+                    // ammo-never-fetched flake). Not part of what's under test.
+                    if (dockie.needs?.rest != null)
+                    {
+                        dockie.needs.rest.CurLevel = dockie.needs.rest.MaxLevel;
+                    }
+                    if (dockie.needs?.food != null)
+                    {
+                        dockie.needs.food.CurLevel = dockie.needs.food.MaxLevel;
+                    }
+                    if (dockie.needs?.joy != null)
+                    {
+                        dockie.needs.joy.CurLevel = dockie.needs.joy.MaxLevel;
+                    }
+                },
                 checks =
                 {
                     C("remembered-all-four", () =>
@@ -394,22 +413,82 @@ namespace CESupplyTestStaging
                         return (pair.Value.stuff == carriedGladius.Stuff,
                             $"pair.stuff={pair.Value.stuff?.defName ?? "null"} carried.stuff={carriedGladius.Stuff?.defName ?? "null"}");
                     }),
-                    C("sniper-ammo-exactly-10", () =>
+                    C("sniper-ammo-demand-exactly-10", () =>
                     {
-                        int n = CarriedAmmoCount(dockie, sniper);
-                        return (n == 10, $"sniper ammo carried={n} (explicit row must suppress derived 2 mags)");
+                        int n = StreamAmmoCount(dockie, sniper);
+                        return (n == 10, $"sniper ammo demand={n} (explicit row must suppress derived 2 mags)");
                     }),
-                    C("shotgun-ammo-2-mags", () =>
+                    C("shotgun-ammo-demand-2-mags", () =>
                     {
-                        int n = CarriedAmmoCount(dockie, shotgun);
+                        int n = StreamAmmoCount(dockie, shotgun);
                         int want = MagOf(shotgun) * 2;
-                        return (n == want, $"shotgun ammo carried={n} want={want}");
+                        return (n == want, $"shotgun ammo demand={n} want={want}");
                     }),
-                    C("pistol-ammo-2-mags", () =>
+                    C("pistol-ammo-demand-2-mags", () =>
+                    {
+                        int n = StreamAmmoCount(dockie, pistol);
+                        int want = MagOf(pistol) * 2;
+                        return (n == want, $"pistol ammo demand={n} want={want}");
+                    }),
+                    C("fetch-forensics", () =>
+                    {
+                        CompInventory inv = dockie.TryGetComp<CompInventory>();
+                        var stream = Stream(dockie);
+                        string slots = string.Join(",", stream.Select(s =>
+                            (s.thingDef?.defName ?? s.genericDef?.defName ?? "?") + "x" + s.count));
+                        var ammoOnMap = dockie.Map.listerThings.AllThings
+                            .Where(t => t.def is AmmoDef && t.Spawned).Take(3)
+                            .Select(t => $"{t.def.defName}x{t.stackCount}@{t.Position}");
+                        return (true,
+                            $"bulk={inv?.currentBulk:F1}/{inv?.capacityBulk:F1} weight={inv?.currentWeight:F1}/{inv?.capacityWeight:F1} " +
+                            $"job={dockie.CurJobDef?.defName} slots=[{slots}] mapAmmo=[{string.Join(" ", ammoOnMap)}]");
+                    }, informational: true),
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                label = "derived-ammo-physically-fetched",
+                deadlineTicks = 40000,
+                mutate = () =>
+                {
+                    // Four CE weapons put a colonist ~60% over bulk capacity, so ammo
+                    // physically cannot fit — proof that CE ACTS on the derived demand
+                    // needs headroom. Shed everything but the pistol, then watch its
+                    // derived rounds actually arrive.
+                    foreach (ThingDef def in new[] { sniper, shotgun, gladius })
+                    {
+                        LoadoutSlot slot = SlotOf(def);
+                        if (slot != null)
+                        {
+                            loadout.RemoveSlot(slot);
+                        }
+                    }
+                    ForceReconcile(dockie);
+                    foreach (ThingWithComps weapon in dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                                                           .Where(w => w.def != pistol).ToList())
+                    {
+                        if (dockie.equipment?.Primary == weapon)
+                        {
+                            dockie.equipment.TryDropEquipment(weapon, out _, dockie.Position, forbid: false);
+                        }
+                        else
+                        {
+                            dockie.inventory.innerContainer.TryDrop(weapon, dockie.Position, dockie.Map,
+                                ThingPlaceMode.Near, out _);
+                        }
+                    }
+                    dockie.TryGetComp<CompInventory>()?.UpdateInventory();
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("pistol-ammo-arrives", () =>
                     {
                         int n = CarriedAmmoCount(dockie, pistol);
-                        int want = MagOf(pistol) * 2;
-                        return (n == want, $"pistol ammo carried={n} want={want}");
+                        int want = MagOf(pistol) * loadout.adHocMags;
+                        CompInventory inv = dockie.TryGetComp<CompInventory>();
+                        return (n >= want, $"pistol ammo carried={n} want>={want} bulk={inv?.currentBulk:F1}/{inv?.capacityBulk:F1} job={dockie.CurJobDef?.defName}");
                     }),
                 }
             });
@@ -418,7 +497,20 @@ namespace CESupplyTestStaging
             {
                 label = "reorder-shotgun-top",
                 deadlineTicks = 6000,
-                mutate = () => { MoveTop(shotgun); ForceReconcile(dockie); },
+                mutate = () =>
+                {
+                    // restore the kit the fetch phase stripped, then reorder
+                    foreach (ThingDef def in new[] { sniper, shotgun, gladius })
+                    {
+                        if (SlotOf(def) == null)
+                        {
+                            loadout.AddSlot(new LoadoutSlot(def, 1));
+                        }
+                    }
+                    ForceReconcile(dockie);
+                    MoveTop(shotgun);
+                    ForceReconcile(dockie);
+                },
                 checks =
                 {
                     C("default-ranged-flips-to-shotgun", () =>
@@ -490,6 +582,43 @@ namespace CESupplyTestStaging
                     {
                         bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
                         return (present, "pistol remembered=" + present);
+                    }),
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                label = "preexisting-memory-claimed-by-loadout",
+                deadlineTicks = 8000,
+                mutate = () =>
+                {
+                    // The common real-world ordering: the pawn ALREADY carries and
+                    // remembers a gun (SS auto-remembers anything equipped as primary),
+                    // and THEN the player builds the loadout around it. The projection
+                    // must still claim it, so removing it from the loadout forgets it
+                    // and CE is free to drop it.
+                    var revolverThing = (ThingWithComps)ThingMaker.MakeThing(revolver);
+                    dockie.inventory.innerContainer.TryAdd(revolverThing, true);
+                    Mem(dockie).InformOfAddedSidearm(revolverThing);
+                    loadout.AddSlot(new LoadoutSlot(revolver, 1));
+                    ForceReconcile(dockie);
+                    loadout.RemoveSlot(SlotOf(revolver));
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("preexisting-memory-forgotten-on-removal", () =>
+                    {
+                        bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == revolver);
+                        return (!present, $"revolver remembered={present} (loadout owns what it lists)");
+                    }),
+                    C("ce-free-to-drop-it", () =>
+                    {
+                        bool excess = Utility_HoldTracker.GetExcessThing(dockie, out Thing dropThing, out int _);
+                        bool targeted = excess && dropThing?.def == revolver;
+                        bool stillCarried = CarriedWeaponDefs(dockie).Contains(revolver);
+                        return (targeted || !stillCarried,
+                            $"excess={excess} dropThing={dropThing?.def?.defName ?? "none"} stillCarried={stillCarried}");
                     }),
                 }
             });

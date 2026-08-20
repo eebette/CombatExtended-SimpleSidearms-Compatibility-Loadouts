@@ -10,7 +10,7 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
 ```
 
-`supply1` covers, in phases: initial reconcile + physical fetch (memory contents, roles,
+`supply1` covers, in phases (10 phases, full green 2026-08-20): initial reconcile + physical fetch (memory contents, roles,
 mode, gladius stuff fix-up, ammo counts incl. explicit-row suppression), reorder→role
 flip, manual role override sticking, template forget, manual-memory protection through
 template churn, Ad hoc untick parity (stream + physical drop), Ad hoc re-tick, and the
@@ -20,6 +20,22 @@ ammo-for-all-remembered opt-in. `supply2` covers memory-only refetch. Full pass 
 **SUPPLY-2 open question answered (2026-08-17 run): CE DOES evaluate default-loadout
 pawns — Fetchy-Default fetched the pistol too.** Refetch reaches pawns with no assigned
 loadout.
+
+Two things the harness pinned down that are worth keeping in mind:
+
+- **The loadout owns what it lists.** Simple Sidearms auto-remembers any weapon a
+  pawn equips as primary, so a loadout built around a gun the pawn already
+  carries used to leave that gun unclaimed by the projection — and removing it
+  from the loadout would leave it remembered, hence exempt from CE's drop,
+  forever. Reconcile now claims every listed def regardless of who remembered it
+  first; `preexisting-memory-claimed-by-loadout` is the regression test (memory
+  forgotten on removal AND CE free to drop).
+- **Four CE weapons put a colonist ~60% over bulk capacity**, so physical ammo
+  cannot fit while the whole staged kit is carried. Phase 1 therefore asserts
+  ammo DEMAND (the slot stream), and a dedicated phase sheds the kit down to the
+  pistol before asserting that derived rounds physically arrive. The old
+  carriage-based assertions in phase 1 could only ever pass by luck of fetch
+  ordering.
 
 Remaining MANUAL checks (visual/config-level, not covered by the runner): SS gizmo
 rendering of remembered weapons; "CE ammo system disabled" settings run; save/load

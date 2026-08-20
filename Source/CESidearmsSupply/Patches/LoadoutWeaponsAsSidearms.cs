@@ -82,20 +82,31 @@ namespace CESidearmsSupply.Patches
                                              .FirstOrDefault(w => w.def == def);
                 List<ThingDefStuffDefPair> rememberedOfDef = memory.RememberedWeapons.Where(p => p.thing == def).ToList();
 
+                // THE LOADOUT OWNS WHAT IT LISTS — claim the def regardless of who
+                // remembered it first. Simple Sidearms auto-remembers any weapon a pawn
+                // equips as primary (InformOfAddedPrimary), so a loadout built around a
+                // gun the pawn already carries would otherwise never be claimed, and
+                // removing that gun from the loadout would leave it remembered (and so
+                // exempt from CE's drop) forever. Weapons the loadout does NOT list are
+                // untouched — deliberate sidearms still beat the projection.
+                rec ??= comp.GetRecord(pawn, create: true);
+                if (!rec.weapons.Contains(def))
+                {
+                    rec.weapons.Add(def);
+                }
+
                 if (rememberedOfDef.Count == 0)
                 {
                     ThingDefStuffDefPair pair = carried != null
                         ? carried.toThingDefStuffDefPair()
                         : new ThingDefStuffDefPair(def, def.MadeFromStuff ? GenStuff.DefaultStuffFor(def) : null);
                     memory.RememberedWeapons.Add(pair);
-                    rec ??= comp.GetRecord(pawn, create: true);
-                    rec.weapons.Add(def);
                     if (carried != null)
                     {
                         HoldSync.EnsureHeld(pawn, carried);
                     }
                 }
-                else if (rec != null && rec.weapons.Contains(def) && carried != null)
+                else if (carried != null)
                 {
                     // Projection-owned memory with a stuff mismatch: retarget to the real instance.
                     ThingDefStuffDefPair actual = carried.toThingDefStuffDefPair();
