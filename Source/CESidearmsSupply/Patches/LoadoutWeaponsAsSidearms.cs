@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using CombatExtended;
-using CESimpleSidearmsCompat.Patches;
 using HarmonyLib;
 using PeteTimesSix.SimpleSidearms;
 using RimWorld;
