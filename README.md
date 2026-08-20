@@ -34,8 +34,13 @@ threatened, target-aware ammo and armor-aware melee scoring.
 **Loadout weapons as sidearms** — weapon defs listed in a CE loadout are auto-remembered as sidearms
 by assigned pawns. *List order is role order*: first weapon = the main (sets SS default
 ranged / preferred melee and combat mode), the rest are backups. Weapons removed from the
-loadout are forgotten again — but only if the projection added them; manually remembered
-weapons are never touched (tracked per-def in a small saved component). Player overrides of
+loadout are forgotten again — **whatever the loadout lists, the loadout owns**, including
+weapons Simple Sidearms had already remembered on its own (it auto-remembers anything a pawn
+equips as primary, which is the usual case when you build a loadout around a gun a pawn is
+already carrying). Forgetting the memory is what lets CE clear the weapon out of the
+inventory, so *removed from loadout → removed from the pawn*. Weapons the loadout never
+listed are never touched: deliberate sidearms stay deliberate (tracked per-def in a small
+saved component). Player overrides of
 default/preferred/mode always stick. Generic slots ("any ranged weapon") and multi-count
 weapon slots (trade stock) are ignored — those are hauling/cargo semantics; kit declaration
 is a single copy of a specific def.
