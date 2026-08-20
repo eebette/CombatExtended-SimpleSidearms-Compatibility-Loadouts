@@ -101,10 +101,10 @@ namespace CESidearmsSupply.Patches
                         ? carried.toThingDefStuffDefPair()
                         : new ThingDefStuffDefPair(def, def.MadeFromStuff ? GenStuff.DefaultStuffFor(def) : null);
                     memory.RememberedWeapons.Add(pair);
-                    if (carried != null)
-                    {
-                        HoldSync.EnsureHeld(pawn, carried);
-                    }
+                    // No hold-record write: the compatibility patch answers CE's drop question
+                    // from SS memory directly (GetExcessThing / GetExcessEquipment postfixes),
+                    // so adding the pair above is already the whole exemption. Writing into
+                    // CE's hold-tracker clobbered records the player set with CE's own command.
                 }
                 else if (carried != null)
                 {
