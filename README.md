@@ -9,6 +9,18 @@ loadouts and [Simple Sidearms](https://github.com/PeteTimesSix/SimpleSidearms) m
 mental model. Builds on (and requires) the
 [CE + Simple Sidearms Compatibility patch](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch).
 
+## The suite
+
+[![Compatibility Patch](Media/Badge_Patch.png)](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch)
+
+The core, repair-only patch — **required** by this module. Eleven repair axes so
+CE and Simple Sidearms work as their authors intended.
+
+[![Compatibility Module - Tactics](Media/Badge_Tactics.png)](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Tactics)
+
+Sibling module (not required): combat-time weapon choice — reload-abort when
+threatened, target-aware ammo and armor-aware melee scoring.
+
 ## The model
 
 - **CE loadout = template layer** (shared template): consumables policy, and weapon slots as
