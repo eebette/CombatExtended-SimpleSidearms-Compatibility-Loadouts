@@ -30,7 +30,7 @@ namespace CESupplyTestStaging
             // Scenario prefix routing: this runner owns "supply"; the compat patch's
             // CETestRunner owns "cetest". Both staging mods share the test profile.
             if (!GenCommandLine.TryGetCommandLineArg("ceassert", out string scenario)
-                || scenario.NullOrEmpty() || !scenario.StartsWith("supply"))
+                || scenario.NullOrEmpty() || !scenario.StartsWith("supply") || scenario.StartsWith("supplybench"))
             {
                 return;
             }
@@ -80,7 +80,7 @@ namespace CESupplyTestStaging
         public override void LoadedGame()
         {
             if (!GenCommandLine.TryGetCommandLineArg("ceassert", out scenario)
-                || scenario.NullOrEmpty() || !scenario.StartsWith("supply"))
+                || scenario.NullOrEmpty() || !scenario.StartsWith("supply") || scenario.StartsWith("supplybench"))
             {
                 return;
             }
@@ -680,6 +680,150 @@ namespace CESupplyTestStaging
                         int n = StreamAmmoCount(dockie, revolver);
                         int want = MagOf(revolver) * CESidearmsSupply.SupplyMod.Settings.spareMagazines;
                         return (n == want, $"revolver ammo demand in stream={n} want={want}");
+                    }),
+                }
+            });
+
+            // The role is the head of [player's own choice] ++ [loadout order], filtered to
+            // what the pawn actually carries. A weapon the player equips outranks the loadout
+            // while they hold it; put it away and the loadout's first takes over; pick it back
+            // up and it returns. Nothing is surrendered permanently.
+            ThingWithComps playerPick = null;
+            phases.Add(new Phase
+            {
+                label = "player-pick-heads-the-list",
+                deadlineTicks = 6000,
+                mutate = () =>
+                {
+                    CESidearmsSupply.SupplyMod.Settings.ammoForAllRemembered = false;
+                    Mem(dockie).RememberedWeapons.RemoveAll(p => p.thing == revolver);
+                    // An undeclared weapon, equipped: exactly what SS does on a battlefield pickup.
+                    playerPick = (ThingWithComps)ThingMaker.MakeThing(D("Gun_HeavySMG"));
+                    dockie.inventory.innerContainer.TryAdd(playerPick, true);
+                    Mem(dockie).InformOfAddedPrimary(playerPick);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("carried-player-pick-outranks-loadout", () =>
+                    {
+                        ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
+                        return (def == playerPick.def, $"default={def?.defName ?? "none"} want={playerPick.def.defName}");
+                    }),
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                label = "loadout-takes-over-when-pick-is-gone",
+                deadlineTicks = 6000,
+                mutate = () =>
+                {
+                    dockie.inventory.innerContainer.Remove(playerPick);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("head-falls-through-to-loadout-first", () =>
+                    {
+                        ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
+                        return (def == sniper, $"default={def?.defName ?? "none"} want={sniper.defName}");
+                    }),
+                    C("displaced-pick-is-shelved-not-lost", () =>
+                    {
+                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
+                        ThingDef shelved = rec?.shelvedRanged?.thing;
+                        return (shelved == playerPick.def, $"shelved={shelved?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                label = "pick-returns-to-head-when-carried-again",
+                deadlineTicks = 6000,
+                mutate = () =>
+                {
+                    dockie.inventory.innerContainer.TryAdd(playerPick, true);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("head-is-the-player-pick-again", () =>
+                    {
+                        ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
+                        return (def == playerPick.def, $"default={def?.defName ?? "none"} want={playerPick.def.defName}");
+                    }),
+                    C("shelf-cleared", () =>
+                    {
+                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
+                        return (rec?.shelvedRanged == null, $"shelved={rec?.shelvedRanged?.thing?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            // "Carry it, but do not wield it": forgetting a DECLARED weapon in SS's gizmo is
+            // the only way to say that, and the projection used to re-claim it every pass.
+            phases.Add(new Phase
+            {
+                label = "gizmo-forget-of-declared-weapon-sticks",
+                deadlineTicks = 6000,
+                mutate = () =>
+                {
+                    foreach (var pair in Mem(dockie).RememberedWeapons.Where(p => p.thing == pistol).ToList())
+                    {
+                        Mem(dockie).ForgetSidearmMemory(pair);
+                    }
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie); // a second pass is where the old code re-claimed it
+                },
+                checks =
+                {
+                    C("stays-forgotten", () =>
+                    {
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
+                        return (!remembered, $"pistol remembered={remembered} (player took it out of the list)");
+                    }),
+                    C("recorded-as-suppressed", () =>
+                    {
+                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
+                        bool sup = rec != null && rec.suppressed.Contains(pistol);
+                        return (sup, $"suppressed={sup}");
+                    }),
+                    C("still-declared-so-ce-keeps-hauling-it", () =>
+                    {
+                        // Suppression must not touch the loadout: the row is still there, so CE
+                        // still carries the weapon. That is the whole point of the distinction.
+                        bool declared = loadout.Slots.Any(sl => sl.thingDef == pistol);
+                        return (declared, $"pistol still in loadout={declared}");
+                    }),
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                label = "re-remembering-resumes-management",
+                deadlineTicks = 6000,
+                mutate = () =>
+                {
+                    ThingWithComps carriedPistol = dockie.inventory.innerContainer.OfType<ThingWithComps>()
+                        .FirstOrDefault(t => t.def == pistol);
+                    if (carriedPistol == null)
+                    {
+                        carriedPistol = (ThingWithComps)ThingMaker.MakeThing(pistol);
+                        dockie.inventory.innerContainer.TryAdd(carriedPistol, true);
+                    }
+                    Mem(dockie).InformOfAddedSidearm(carriedPistol);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("suppression-cleared", () =>
+                    {
+                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
+                        bool sup = rec != null && rec.suppressed.Contains(pistol);
+                        bool claimed = rec != null && rec.weapons.Contains(pistol);
+                        return (!sup && claimed, $"suppressed={sup} claimed={claimed}");
                     }),
                 }
             });

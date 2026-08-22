@@ -10,12 +10,38 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
 ```
 
-`supply1` covers, in 10 phases: initial reconcile + physical fetch (memory contents, roles,
+`supply1` covers, in 15 phases: initial reconcile + physical fetch (memory contents, roles,
 mode, gladius stuff fix-up, ammo counts incl. explicit-row suppression), reorder→role
 flip, manual role override sticking, template forget, manual-memory protection through
 template churn, Ad hoc untick parity (stream + physical drop), Ad hoc re-tick, and the
 ammo-for-all-remembered opt-in. `supply2` covers the CE-capacity gate on Simple Sidearms'
-own weapon retrieval.
+own weapon retrieval. The last five `supply1` phases cover the role model and the
+suppression rule: a player-equipped weapon heads the list while carried, the loadout's
+first takes over when it is stowed (with the displaced choice shelved), it returns when
+carried again, and forgetting a declared weapon in SS's gizmo sticks instead of being
+re-claimed on the next pass.
+
+## Benchmark
+
+`./test/run-supply-bench.sh [label]` loads SUPPLY-1 and times `Loadout.GetSlotsFor` in the
+three shapes CE actually uses — full enumeration, `FirstOrDefault`, `Any(predicate)` — with
+the module's patches active and again with them removed, in one process. 200k iterations x 5
+rounds, best-of; anything shorter measures scheduler noise at these sub-microsecond costs.
+
+Measured 2026-08-22 (CE 16.7.3.0, SS v1.6), before and after making the postfix lazy:
+
+| | full | firstOnly | anyMatch |
+|---|---|---|---|
+| eager postfix | 0.583 us | 0.661 us | 0.660 us |
+| lazy postfix | 0.704 us | 0.405 us | 0.410 us |
+| stock CE | 0.289 us | 0.198 us | 0.194 us |
+
+Eagerly materialising the stream made the short-circuit shapes cost as much as full
+enumeration, which is what CE's callers are written to avoid. Overhead on those paths fell
+from +0.463 us to +0.214 us. Full enumeration costs ~0.12 us more than before (one extra
+iterator layer) — the right side of the trade, since `GetExcessEquipment` runs from
+`GetPriority` on every think-tree evaluation while full enumeration only happens when CE is
+hunting for work.
 
 **Correction (2026-08-22).** An earlier run recorded "CE DOES evaluate default-loadout
 pawns — Fetchy-Default fetched the pistol too" and credited this module's virtual slots.

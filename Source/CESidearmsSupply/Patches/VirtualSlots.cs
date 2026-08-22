@@ -47,6 +47,17 @@ namespace CESidearmsSupply.Patches
             CacheClearComponent.AddClearCacheAction(cache.Clear);
         }
 
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(Loadout), nameof(Loadout.GetSlotsFor)) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] Loadout.GetSlotsFor not found — ammo will not be derived "
+                      + "for loadout weapons. Combat Extended probably moved it.");
+            return false;
+        }
+
         [HarmonyPostfix]
         public static void Postfix(Loadout __instance, Pawn pawn, ref IEnumerable<LoadoutSlot> __result)
         {
@@ -55,9 +66,31 @@ namespace CESidearmsSupply.Patches
             {
                 return;
             }
-            List<LoadoutSlot> baseSlots = __result.ToList();
-            List<LoadoutSlot> virtuals = VirtualSlotsFor(__instance, pawn, baseSlots);
-            __result = virtuals.Count == 0 ? baseSlots : baseSlots.Concat(virtuals);
+            __result = WithDerivedSlots(__result, __instance, pawn);
+        }
+
+        /// <summary>
+        /// Lazy on purpose. GetSlotsFor is a C# iterator and four of CE's callers stop early
+        /// — GetExcessEquipment takes FirstOrDefault, GetUpdateLoadoutJob calls Any(),
+        /// GetPrioritySlot breaks at the first high-priority slot, TrackingSatisfied returns
+        /// as soon as the count is met. Materialising the stream with ToList() up front made
+        /// every one of them pay for the whole thing, including CE's own ad-hoc tail with its
+        /// GetStorageByThingDef dictionary build. Yielding through and deriving at the end
+        /// keeps their short-circuit, and keeps the result re-runnable the way an iterator's
+        /// is (the old version handed back a cached snapshot).
+        /// </summary>
+        private static IEnumerable<LoadoutSlot> WithDerivedSlots(IEnumerable<LoadoutSlot> baseSlots, Loadout loadout, Pawn pawn)
+        {
+            var seen = new List<LoadoutSlot>();
+            foreach (LoadoutSlot slot in baseSlots)
+            {
+                seen.Add(slot);
+                yield return slot;
+            }
+            foreach (LoadoutSlot derived in VirtualSlotsFor(loadout, pawn, seen))
+            {
+                yield return derived;
+            }
         }
 
         private static List<LoadoutSlot> VirtualSlotsFor(Loadout loadout, Pawn pawn, List<LoadoutSlot> baseSlots)

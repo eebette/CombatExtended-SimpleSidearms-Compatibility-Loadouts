@@ -39,11 +39,17 @@ weapons Simple Sidearms had already remembered on its own (it auto-remembers any
 equips as primary, which is the usual case when you build a loadout around a gun a pawn is
 already carrying). Forgetting the memory is what lets CE clear the weapon out of the
 inventory, so *removed from loadout → removed from the pawn*. Weapons the loadout never
-listed are never touched (tracked per-def in a small saved component). A def the loadout
+listed are never touched (tracked per-def in a small saved component). Forget a declared
+weapon in SS's own gizmo and it stays forgotten — that is how you say *carry this but don't
+wield it*, which removing the loadout row cannot express (that would stop the pawn carrying
+it at all). Put it back in the list and the loadout manages it again. A def the loadout
 DOES list is claimed whoever remembered it first — that is the rule that makes "removed from
 loadout, removed from the pawn" hold, since Simple Sidearms auto-remembers any weapon a pawn
-equips as primary. Player overrides of
-default/preferred/mode always stick. Generic slots ("any ranged weapon") and multi-count
+equips as primary. The main-weapon role is the head of one ordered list — *the weapon you put in their hands*,
+then *the loadout's order* — filtered to what the pawn is actually carrying. Equip something
+the loadout doesn't list and it leads while they hold it; stow it and the loadout's first
+takes over; pick it back up and it leads again. Forced weapons and "prefer unarmed" outrank
+the list entirely and are never touched. Generic slots ("any ranged weapon") and multi-count
 weapon slots (trade stock) are ignored — those are hauling/cargo semantics; kit declaration
 is a single copy of a specific def.
 

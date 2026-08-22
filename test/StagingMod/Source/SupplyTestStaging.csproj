@@ -18,6 +18,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
         <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.*" />
+        <PackageReference Include="Lib.Harmony" Version="2.3.6" ExcludeAssets="runtime" />
         <PackageReference Include="Krafs.Publicizer" Version="2.3.0" PrivateAssets="all" />
     </ItemGroup>
 

@@ -29,6 +29,22 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob")]
     public static class JobGiver_UpdateLoadout_TryGiveJob_Patch
     {
+        /// <summary>
+        /// CE has no ABI policy, so a rename here should cost this one feature rather than
+        /// aborting PatchAll and taking the ammo adapter down with it. CE's house rule:
+        /// missing target degrades with a named error, never throws.
+        /// </summary>
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(JobGiver_UpdateLoadout), "TryGiveJob") != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] JobGiver_UpdateLoadout.TryGiveJob not found — loadout weapons "
+                      + "will not be projected as sidearms. Combat Extended probably moved it.");
+            return false;
+        }
+
         [HarmonyPrefix]
         public static void Prefix(Pawn pawn)
         {
@@ -94,6 +110,9 @@ namespace CESidearmsSupply.Patches
                     }
                     rec.weapons.Remove(gone);
                 }
+                // A def that leaves the loadout also leaves suppression: otherwise removing
+                // and re-adding the row would stay silently suppressed forever.
+                rec.suppressed.RemoveWhere(d => !templateDefs.Contains(d));
             }
 
             // Hoisted: GetCarriedWeapons allocates a list and walks the whole inventory on
@@ -136,6 +155,28 @@ namespace CESidearmsSupply.Patches
                 // exempt from CE's drop) forever. Weapons the loadout does NOT list are
                 // untouched — deliberate sidearms still beat the projection.
                 rec ??= comp.GetRecord(pawn, create: true);
+
+                // "Carry it, but do not wield it." A loadout row says CARRY; membership in
+                // the sidearm list says AND BE WILLING TO SWITCH TO IT. Forgetting a declared
+                // weapon in SS's gizmo is the only way to say the first without the second —
+                // removing the row would stop the pawn carrying it at all. Re-claiming it on
+                // the next reconcile drove over that, so a def we already claimed and the
+                // player then forgot becomes suppressed instead.
+                if (rememberedOfDef.Count == 0 && rec.weapons.Contains(def))
+                {
+                    rec.weapons.Remove(def);
+                    rec.suppressed.Add(def);
+                    continue;
+                }
+                if (rec.suppressed.Contains(def))
+                {
+                    if (rememberedOfDef.Count == 0)
+                    {
+                        continue; // still suppressed; the loadout keeps hauling it, SS ignores it
+                    }
+                    rec.suppressed.Remove(def); // player put it back in the list — manage it again
+                }
+
                 if (!rec.weapons.Contains(def))
                 {
                     rec.weapons.Add(def);
@@ -178,70 +219,130 @@ namespace CESidearmsSupply.Patches
                 return;
             }
 
-            ApplyRoles(memory, rec, templateDefs);
+            ApplyRoles(pawn, memory, rec, templateDefs);
+            ApplyMode(memory, rec, templateDefs);
         }
 
         /// <summary>
-        /// Set default ranged / preferred melee / combat mode from list order, but only
-        /// when the current value is unset or is the one we set last — a player override
-        /// always sticks.
+        /// The role a pawn falls back to is the head of one ordered list:
         ///
-        /// "Unset" is not the same as null. Simple Sidearms expresses *deliberately unarmed*
-        /// by raising a flag and nulling the pair, so reading a null pair as "nobody owns
-        /// this" made the projection re-assert a melee weapon every reconcile and silently
-        /// clear the player's unarmed choice — permanently, for any pawn whose loadout lists
-        /// a melee weapon. The unarmed and forced states are checked explicitly.
+        ///     [the weapon the player put in their hands] ++ [the loadout's order]
+        ///
+        /// filtered to what the pawn is actually carrying. Equipping a weapon the loadout
+        /// does not list makes it the head — Simple Sidearms sets the role itself on equip,
+        /// and that is a deliberate player action, so it stands. Stop carrying it and the
+        /// head falls through to the loadout's first declared weapon of that kind; pick it
+        /// back up (SS fetches it on its own) and it is the head again. The displaced choice
+        /// is SHELVED in the record rather than overwritten away, so it can come back.
+        ///
+        /// Nothing here is a judgement about who "owns" the field. The old ownership test
+        /// surrendered the role forever the first time anything else wrote it, which left a
+        /// pawn whose battlefield pickup was later stashed with a role pointing at a weapon
+        /// SS then ignored (its hasWeaponType guard is pair-exact) and a loadout order that
+        /// never came back.
+        ///
+        /// Forced weapons and the unarmed states are checked first and never touched: SS's
+        /// role setters clear a same-category ForcedWeapon as a side effect, and
+        /// SetMeleeWeaponTypeAsPreferred also clears PreferredUnarmed — so writing a role
+        /// here would destroy an explicit player setting. "No pair" is not "no owner".
         /// </summary>
-        private static void ApplyRoles(CompSidearmMemory memory, PawnTemplateRecord rec, List<ThingDef> templateDefs)
+        private static void ApplyRoles(Pawn pawn, CompSidearmMemory memory, PawnTemplateRecord rec, List<ThingDef> templateDefs)
         {
-            ThingDef firstRanged = templateDefs.FirstOrDefault(d => d.IsRangedWeapon);
-            ThingDef firstMelee = templateDefs.FirstOrDefault(d => d.IsMeleeWeapon);
+            ApplyRangedRole(pawn, memory, rec, templateDefs.FirstOrDefault(d => d.IsRangedWeapon));
+            ApplyMeleeRole(pawn, memory, rec, templateDefs.FirstOrDefault(d => d.IsMeleeWeapon));
+        }
 
-            ThingDefStuffDefPair? curRanged = memory.DefaultRangedWeapon;
-            bool rangedOurs = (curRanged == null && !memory.ForcedUnarmed && !memory.ForcedWeapon.HasValue)
-                              || (rec.defaultRanged != null && curRanged?.thing == rec.defaultRanged);
-            if (rangedOurs)
+        private static void ApplyRangedRole(Pawn pawn, CompSidearmMemory memory, PawnTemplateRecord rec, ThingDef loadoutFirst)
+        {
+            if (memory.ForcedWeapon.HasValue || memory.ForcedUnarmed)
             {
-                if (firstRanged != null)
-                {
-                    ThingDefStuffDefPair pair = memory.RememberedWeapons.FirstOrDefault(p => p.thing == firstRanged);
-                    if (pair.thing != null && curRanged != pair)
-                    {
-                        memory.SetRangedWeaponTypeAsDefault(pair);
-                    }
-                    rec.defaultRanged = firstRanged;
-                }
-                else if (rec.defaultRanged != null && curRanged != null)
-                {
-                    memory.UnsetRangedWeaponDefault();
-                    rec.defaultRanged = null;
-                }
+                return; // an explicit force outranks the list, and writing here would clear it
             }
 
-            ThingDefStuffDefPair? curMelee = memory.PreferredMeleeWeapon;
-            bool meleeOurs = (curMelee == null && !memory.PreferredUnarmed && !memory.ForcedUnarmed)
-                             || (rec.preferredMelee != null && curMelee?.thing == rec.preferredMelee);
-            if (meleeOurs)
+            ThingDefStuffDefPair? current = memory.DefaultRangedWeapon;
+
+            // The shelved choice comes back the moment the pawn carries it again.
+            if (rec.shelvedRanged.HasValue && pawn.hasWeaponType(rec.shelvedRanged.Value))
             {
-                if (firstMelee != null)
-                {
-                    ThingDefStuffDefPair pair = memory.RememberedWeapons.FirstOrDefault(p => p.thing == firstMelee);
-                    // Compare the whole pair, not just the def: a stuff retarget leaves the
-                    // role naming a pair the pawn no longer owns, and a def-level test cannot
-                    // see that.
-                    if (pair.thing != null && curMelee != pair)
-                    {
-                        memory.SetMeleeWeaponTypeAsPreferred(pair);
-                    }
-                    rec.preferredMelee = firstMelee;
-                }
-                else if (rec.preferredMelee != null && curMelee != null)
-                {
-                    memory.UnsetMeleeWeaponPreference();
-                    rec.preferredMelee = null;
-                }
+                memory.SetRangedWeaponTypeAsDefault(rec.shelvedRanged.Value);
+                rec.shelvedRanged = null;
+                rec.defaultRanged = null; // the head is the player's again, not ours
+                return;
             }
 
+            bool ours = current == null || (rec.defaultRanged != null && current.Value.thing == rec.defaultRanged);
+            if (!ours)
+            {
+                if (pawn.hasWeaponType(current.Value))
+                {
+                    rec.shelvedRanged = null; // their choice is in hand; it IS the head
+                    return;
+                }
+                rec.shelvedRanged = current; // not carried — step aside, but remember it
+            }
+
+            if (loadoutFirst != null)
+            {
+                ThingDefStuffDefPair pair = memory.RememberedWeapons.FirstOrDefault(p => p.thing == loadoutFirst);
+                if (pair.thing != null && current != pair)
+                {
+                    memory.SetRangedWeaponTypeAsDefault(pair);
+                }
+                rec.defaultRanged = loadoutFirst;
+            }
+            else if (rec.defaultRanged != null && current != null)
+            {
+                memory.UnsetRangedWeaponDefault();
+                rec.defaultRanged = null;
+            }
+        }
+
+        private static void ApplyMeleeRole(Pawn pawn, CompSidearmMemory memory, PawnTemplateRecord rec, ThingDef loadoutFirst)
+        {
+            if (memory.ForcedWeapon.HasValue || memory.ForcedUnarmed || memory.PreferredUnarmed)
+            {
+                return; // see above; PreferredUnarmed is a real choice that nulls the pair
+            }
+
+            ThingDefStuffDefPair? current = memory.PreferredMeleeWeapon;
+
+            if (rec.shelvedMelee.HasValue && pawn.hasWeaponType(rec.shelvedMelee.Value))
+            {
+                memory.SetMeleeWeaponTypeAsPreferred(rec.shelvedMelee.Value);
+                rec.shelvedMelee = null;
+                rec.preferredMelee = null;
+                return;
+            }
+
+            bool ours = current == null || (rec.preferredMelee != null && current.Value.thing == rec.preferredMelee);
+            if (!ours)
+            {
+                if (pawn.hasWeaponType(current.Value))
+                {
+                    rec.shelvedMelee = null;
+                    return;
+                }
+                rec.shelvedMelee = current;
+            }
+
+            if (loadoutFirst != null)
+            {
+                ThingDefStuffDefPair pair = memory.RememberedWeapons.FirstOrDefault(p => p.thing == loadoutFirst);
+                if (pair.thing != null && current != pair)
+                {
+                    memory.SetMeleeWeaponTypeAsPreferred(pair);
+                }
+                rec.preferredMelee = loadoutFirst;
+            }
+            else if (rec.preferredMelee != null && current != null)
+            {
+                memory.UnsetMeleeWeaponPreference();
+                rec.preferredMelee = null;
+            }
+        }
+
+        private static void ApplyMode(CompSidearmMemory memory, PawnTemplateRecord rec, List<ThingDef> templateDefs)
+        {
             ThingDef firstAny = templateDefs.FirstOrDefault();
             bool modeOurs = rec.modeManaged
                 ? memory.primaryWeaponMode == rec.lastMode
