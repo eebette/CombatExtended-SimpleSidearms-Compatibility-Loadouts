@@ -96,12 +96,37 @@ namespace CESidearmsSupply.Patches
                 }
             }
 
+            // Hoisted: GetCarriedWeapons allocates a list and walks the whole inventory on
+            // every call, and nothing in the loop below changes what the pawn carries — it
+            // only edits SS memory. This runs once per think-tree selection of CE's loadout
+            // job giver, not on the 1800-tick cooldown (that governs the giver's PRIORITY,
+            // and TryGiveJob expires it deliberately whenever it issues a job), so a pawn
+            // working through a loadout re-enters here continuously.
+            List<ThingWithComps> carriedWeapons = pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true);
+            // Reused across defs rather than allocated per def. It cannot be built once up
+            // front: the loop adds and removes pairs as it goes.
+            var rememberedOfDef = new List<ThingDefStuffDefPair>();
+
             // The template giveth: remember listed weapons; fix stuff up to the carried instance.
             foreach (ThingDef def in templateDefs)
             {
-                ThingWithComps carried = pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                                             .FirstOrDefault(w => w.def == def);
-                List<ThingDefStuffDefPair> rememberedOfDef = memory.RememberedWeapons.Where(p => p.thing == def).ToList();
+                ThingWithComps carried = null;
+                for (int i = 0; i < carriedWeapons.Count; i++)
+                {
+                    if (carriedWeapons[i].def == def)
+                    {
+                        carried = carriedWeapons[i];
+                        break;
+                    }
+                }
+                rememberedOfDef.Clear();
+                for (int i = 0; i < memory.RememberedWeapons.Count; i++)
+                {
+                    if (memory.RememberedWeapons[i].thing == def)
+                    {
+                        rememberedOfDef.Add(memory.RememberedWeapons[i]);
+                    }
+                }
 
                 // THE LOADOUT OWNS WHAT IT LISTS — claim the def regardless of who
                 // remembered it first. Simple Sidearms auto-remembers any weapon a pawn
