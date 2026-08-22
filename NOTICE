@@ -1,0 +1,38 @@
+Third-party material in this repository
+=======================================
+
+The MIT license in LICENSE covers this project's own source code, build files,
+and documentation. It does NOT cover the artwork listed below, which is derived
+from Combat Extended's media and is redistributed here under Combat Extended's
+own license.
+
+Combat Extended badge artwork
+-----------------------------
+
+    Media/Badge_CE_compatible.png
+
+Copyright the Combat Extended team. Licensed CC BY-NC-SA 4.0
+(https://creativecommons.org/licenses/by-nc-sa/4.0/). Included unmodified, as
+Combat Extended invites compatible mods to display it.
+
+Artwork derived from the Combat Extended badge
+----------------------------------------------
+
+    About/Preview.png
+    Media/Badge_Suite.png
+    Media/Badge_Patch.png
+    Media/Badge_Loadouts.png
+    Media/Badge_Tactics.png
+
+These composites remix the rifle glyph from Badge_CE_compatible.png. As
+derivative works of CC BY-NC-SA 4.0 material they carry the same terms —
+attribution to the Combat Extended team, non-commercial use only, and
+share-alike — and are NOT offered under this project's MIT license.
+
+Simple Sidearms
+---------------
+
+No Simple Sidearms artwork is included; the sidearm glyph in the composites
+above is drawn from scratch. No Combat Extended or Simple Sidearms code or
+assemblies are vendored in this repository — see RELEASING.md ("Why there is
+no CI") and the compatibility patch's own NOTICE.

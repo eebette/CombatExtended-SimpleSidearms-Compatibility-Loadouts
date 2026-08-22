@@ -54,8 +54,8 @@ namespace CESupplyTestStaging
             anchor = ComputeAnchor(map);
             Log.Message($"[SupplyStaging] Map {map.Size}, staging anchor {anchor}.");
 
-            // SUPPLY-2 exercises the opt-in refetch path; flip it on in this profile.
-            CESidearmsSupply.SupplyMod.Settings.refetchAllRemembered = true;
+            // SUPPLY-2 exercises the CE-capacity gate on Simple Sidearms' own retrieval.
+            CESidearmsSupply.SupplyMod.Settings.capacityAwareRetrieval = true;
             LoadedModManager.GetMod<CESidearmsSupply.SupplyMod>()?.WriteSettings();
 
             Stage1_LoadoutSidearms(map);
@@ -68,6 +68,15 @@ namespace CESupplyTestStaging
             Find.LetterStack.ReceiveLetter("SUPPLY saves created",
                 "Staged saves written: SUPPLY-1-loadout-sidearms, SUPPLY-2-refetch.\n\nQuit to main menu and Load one, then UNPAUSE and watch the reconcile/fetch happen. See TESTPLAN.md.",
                 LetterDefOf.PositiveEvent);
+
+            // -cesupplystage is an automated run by definition; waiting for a human to quit
+            // meant an unattended stage-then-assert chain idled here forever with the saves
+            // already written. Pass -cesupplystagehold to keep the game open and look around.
+            if (!GenCommandLine.CommandLineArgPassed("cesupplystagehold"))
+            {
+                Log.Message("[SupplyStaging] Staging complete; shutting down.");
+                LongEventHandler.ExecuteWhenFinished(Root.Shutdown);
+            }
         }
 
         // ---- scenarios -----------------------------------------------------
@@ -119,23 +128,21 @@ namespace CESupplyTestStaging
             pawn.SetLoadout(loadout);
         }
 
-        // Weapon refetch from memory alone. Two colonists remember a pistol they do
-        // not carry: one on the DEFAULT loadout, one on an assigned empty loadout —
-        // reveals whether sustainment reaches default-loadout pawns. Replacement
-        // pistols and ammo available on the ground.
+        // Simple Sidearms fetches remembered-but-uncarried weapons on its own
+        // (JobGiver_RetrieveWeapon, vanilla think tree, on by default) without consulting
+        // CE's capacity model. Two colonists remember a pistol neither is carrying:
+        // "Roomy" has space for it, "Stuffed" is loaded until CE reports no room. SS wants
+        // to fetch for both; only Roomy should end up with one.
         private void Stage2_Refetch(Map map)
         {
             ThingDef pistol = Need("Gun_Autopistol");
 
-            Pawn defaultPawn = SpawnColonist(map, "Fetchy-Default", new IntVec3(-6, 0, -4));
-            RememberByDef(defaultPawn, pistol);
+            Pawn roomy = SpawnColonist(map, "Roomy", new IntVec3(-6, 0, -4));
+            RememberByDef(roomy, pistol);
 
-            Pawn loadoutPawn = SpawnColonist(map, "Fetchy-Loadout", new IntVec3(6, 0, -4));
-            var empty = new Loadout("SUPPLY refetch test (empty)");
-            LoadoutManager.AddLoadout(empty);
-            stagedLoadouts.Add(empty);
-            loadoutPawn.SetLoadout(empty);
-            RememberByDef(loadoutPawn, pistol);
+            Pawn stuffed = SpawnColonist(map, "Stuffed", new IntVec3(6, 0, -4));
+            RememberByDef(stuffed, pistol);
+            FillToCapacity(stuffed);
 
             SpawnNear(map, anchor, pistol, null);
             SpawnNear(map, anchor, pistol, null);
@@ -144,6 +151,35 @@ namespace CESupplyTestStaging
             {
                 SpawnStack(map, anchor, ammo, 200);
             }
+        }
+
+        /// <summary>
+        /// Load the pawn with cargo until CE reports no room for another weapon — the state
+        /// SS's own retrieval ignores. Steel reaches the weight cap first, which is fine:
+        /// CanFitInInventory refuses on either limit, and the runner asserts the refusal
+        /// rather than assuming which one bound.
+        /// </summary>
+        private void FillToCapacity(Pawn pawn)
+        {
+            CompInventory inventory = pawn.TryGetComp<CompInventory>();
+            ThingDef filler = Need("Steel");
+            int guard = 0;
+            while (guard++ < 40)
+            {
+                Thing stack = ThingMaker.MakeThing(filler);
+                stack.stackCount = filler.stackLimit;
+                if (!inventory.CanFitInInventory(stack, out int fit) || fit < 1)
+                {
+                    break;
+                }
+                stack.stackCount = fit;
+                inventory.container.TryAdd(stack, true);
+            }
+            inventory.UpdateInventory();
+            // Both limits matter: steel loads a pawn to the WEIGHT cap long before the bulk
+            // cap, and CanFitInInventory refuses on either.
+            Log.Message($"[SupplyStaging] {pawn.LabelShort} weight {inventory.currentWeight:F1}/{inventory.capacityWeight:F1} "
+                        + $"bulk {inventory.currentBulk:F1}/{inventory.capacityBulk:F1}");
         }
 
         // ---- helpers -------------------------------------------------------

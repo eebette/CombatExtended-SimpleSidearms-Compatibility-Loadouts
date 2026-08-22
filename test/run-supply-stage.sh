@@ -19,4 +19,14 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
 fi
 
 rm -f "$SAVEDATA/Saves"/SUPPLY-*.rws
-exec "${GS[@]}" "$RIMWORLD" -savedatafolder="$SAVEDATA" -quicktest -cesupplystage
+# Bounded: the staging mod shuts itself down when the saves are written, and the
+# timeout is the backstop if it wedges before that.
+timeout --signal=TERM 20m "${GS[@]}" "$RIMWORLD" -savedatafolder="$SAVEDATA" -quicktest -cesupplystage || true
+
+for save in SUPPLY-1-loadout-sidearms SUPPLY-2-refetch; do
+    if [[ ! -f "$SAVEDATA/Saves/$save.rws" ]]; then
+        echo "== STAGING FAILED: $save.rws was not written ==" >&2
+        exit 1
+    fi
+done
+echo "== staged: $(ls "$SAVEDATA/Saves"/SUPPLY-*.rws | wc -l) saves =="

@@ -6,9 +6,10 @@ One mental model for [b]Combat Extended[/b] loadouts and [b]Simple Sidearms[/b] 
 
 [h1]What it does[/h1]
 [list]
-[*][b]Loadout weapons become sidearms.[/b] Single-count weapons in a CE loadout are auto-remembered by assigned pawns. First in the list sets the main-weapon role (default ranged / preferred melee); the rest are backups. Remove a weapon from the loadout and it's forgotten — and CE then cleans it out of inventories. Weapons you remember manually through the SS gizmo are never touched.
+[*][b]Loadout weapons become sidearms.[/b] Single-count weapons in a CE loadout are auto-remembered by assigned pawns. First in the list sets the main-weapon role (default ranged / preferred melee); the rest are backups. Remove a weapon from the loadout and it's forgotten — and CE then cleans it out of inventories. The loadout is the authority: a weapon def it lists is managed by it whoever remembered that weapon first. Defs the loadout never lists are never touched.
 [*][b]Ammo for declared weapons.[/b] Rides CE's own per-loadout [i]Ad hoc[/i] checkbox: ticked, CE's primary-weapon ammo automation extends to every weapon declared in that loadout, at the loadout's magazine count. Unticked = exactly vanilla CE. Hand-added caliber rows always beat the automation.
-[*][b]Optional full automation.[/b] Mod settings can extend ammo demand and refetch to ALL remembered weapons, including battlefield pickups. Off by default — incidental pickups shouldn't drain your ammo economy unless you say so.
+[*][b]Optional full automation.[/b] A setting extends ammo demand to ALL remembered weapons, including battlefield pickups. Off by default — incidental pickups shouldn't drain your ammo economy unless you say so.
+[*][b]Capacity-aware retrieval.[/b] Simple Sidearms fetches remembered weapons by itself, without checking CE's weight and bulk limits. Retrievals CE has no room for are cancelled instead of overloading the pawn.
 [/list]
 
 [h1]Requires[/h1]

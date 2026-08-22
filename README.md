@@ -39,8 +39,10 @@ weapons Simple Sidearms had already remembered on its own (it auto-remembers any
 equips as primary, which is the usual case when you build a loadout around a gun a pawn is
 already carrying). Forgetting the memory is what lets CE clear the weapon out of the
 inventory, so *removed from loadout → removed from the pawn*. Weapons the loadout never
-listed are never touched: deliberate sidearms stay deliberate (tracked per-def in a small
-saved component). Player overrides of
+listed are never touched (tracked per-def in a small saved component). A def the loadout
+DOES list is claimed whoever remembered it first — that is the rule that makes "removed from
+loadout, removed from the pawn" hold, since Simple Sidearms auto-remembers any weapon a pawn
+equips as primary. Player overrides of
 default/preferred/mode always stick. Generic slots ("any ranged weapon") and multi-count
 weapon slots (trade stock) are ignored — those are hauling/cargo semantics; kit declaration
 is a single copy of a specific def.
@@ -54,18 +56,32 @@ excess-drop logic consume, and where CE synthesizes its own ad-hoc slots (dedupe
 ours). Hand-added caliber rows (or matching generics) suppress derived demand per ammo def:
 explicit beats derived. A separate off-by-default setting extends derivation to ALL
 remembered weapons (battlefield pickups included) for full-automation players, at a global
-spare-magazine count. Stateless — recomputed every evaluation.
+spare-magazine count. Sizing follows CE's own ad-hoc arithmetic, including its mass/bulk
+clamps and the carried-amount band that keeps a pawn one round short from walking to storage
+for one round.
 
-**Weapon refetch** — loadout-declared weapons refetch natively through their real slots.
-An opt-in setting extends this to manually remembered weapons: when one goes missing it
-becomes a virtual loadout slot, and CE's normal fetch machinery replaces it.
+**Capacity-aware retrieval** — Simple Sidearms already fetches remembered weapons a pawn
+isn't carrying (`JobGiver_RetrieveWeapon`, in the vanilla think tree, on by default), and it
+does so without consulting CE's weight and bulk model — neither its job giver nor its pickup
+toil checks capacity. This cancels a retrieval CE says the pawn has no room for, rather than
+letting them haul it back and have it count against everything else they carry. SS still
+decides which weapons are worth fetching; this only supplies the limit it can't see.
 
 ## Building
 
 Same pattern as the compat patch: `dotnet build Source/CESidearmsSupply/CESidearmsSupply.csproj -c Release`.
-References the CE and SS workshop DLLs (`-p:RimWorldWorkshopDir=...` to override) and the
-compat patch DLL (`-p:CompatModDir=...`). CI cannot build this repo; releases are manual.
+References the CE and SS workshop DLLs (`-p:RimWorldWorkshopDir=...` to override). The
+compatibility patch is a runtime dependency but not a build one — this module binds to no
+type in it. CI cannot build this repo; releases are manual.
 
 ## Load order
 
 Harmony → Combat Extended → Simple Sidearms → CE+SS Compatibility → this mod (declared in About.xml).
+
+## License
+
+[MIT](LICENSE) — code, build files, and docs.
+
+The badge artwork is not: `About/Preview.png` and the `Media/Badge_*.png` set remix the rifle
+glyph from Combat Extended's own compatibility badge, so they stay under CE's CC BY-NC-SA 4.0
+(attribution, non-commercial, share-alike). Details in [NOTICE](NOTICE).

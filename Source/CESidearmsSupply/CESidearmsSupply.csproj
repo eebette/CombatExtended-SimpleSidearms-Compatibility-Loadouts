@@ -12,7 +12,6 @@
         <GenerateDependencyFile>false</GenerateDependencyFile>
         <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
         <RimWorldWorkshopDir Condition="'$(RimWorldWorkshopDir)' == ''">$(HOME)/.local/share/Steam/steamapps/workshop/content/294100</RimWorldWorkshopDir>
-        <CompatModDir Condition="'$(CompatModDir)' == ''">$(HOME)/Projects/CombatExtended-SimpleSidearms Compatibility Patch</CompatModDir>
     </PropertyGroup>
 
     <ItemGroup>

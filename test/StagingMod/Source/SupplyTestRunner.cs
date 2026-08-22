@@ -687,39 +687,54 @@ namespace CESupplyTestStaging
             return phases;
         }
 
-        // -- SUPPLY-2: refetch of manually remembered, uncarried weapons --
+        // -- SUPPLY-2: CE capacity gate on Simple Sidearms' own weapon retrieval --
 
         private List<Phase> BuildSupply2()
         {
-            Pawn fetchyLoadout = Colonist("Fetchy-Loadout");
-            Pawn fetchyDefault = Colonist("Fetchy-Default");
+            Pawn roomy = Colonist("Roomy");
+            Pawn stuffed = Colonist("Stuffed");
             ThingDef pistol = D("Gun_Autopistol");
 
             return new List<Phase>
             {
                 new Phase
                 {
-                    label = "refetch-from-memory",
+                    label = "capacity-aware-retrieval",
                     deadlineTicks = 36000,
-                    minTicks = 15000, // hold the phase open so the default-loadout pawn's outcome is observed late, not at first poll
+                    // Hold the phase open: "did not fetch" is only meaningful after the pawn
+                    // has had as long to act as the one that did.
+                    minTicks = 15000,
                     checks =
                     {
                         C("setting-precondition", () =>
                         {
-                            bool on = CESidearmsSupply.SupplyMod.Settings.refetchAllRemembered;
-                            return (on, "refetchAllRemembered=" + on);
+                            bool on = CESidearmsSupply.SupplyMod.Settings.capacityAwareRetrieval;
+                            return (on, "capacityAwareRetrieval=" + on);
                         }),
-                        C("assigned-loadout-pawn-fetches-pistol", () =>
+                        C("stuffed-is-genuinely-full", () =>
                         {
-                            bool has = CarriedWeaponDefs(fetchyLoadout).Contains(pistol);
-                            return (has, "Fetchy-Loadout carries pistol=" + has);
+                            // Without this the phase would pass for any reason a pawn failed
+                            // to fetch. Assert CE actually refuses the pistol for this pawn.
+                            CompInventory inv = stuffed.TryGetComp<CompInventory>();
+                            Thing probe = ThingMaker.MakeThing(pistol);
+                            bool fits = inv != null && inv.CanFitInInventory(probe, out int _);
+                            return (!fits, $"CE says pistol fits={fits} — weight {inv?.currentWeight:F1}/{inv?.capacityWeight:F1}"
+                                           + $" bulk {inv?.currentBulk:F1}/{inv?.capacityBulk:F1}");
                         }),
-                        C("default-loadout-pawn-outcome", () =>
+                        C("ss-retrieval-still-works", () =>
                         {
-                            bool has = CarriedWeaponDefs(fetchyDefault).Contains(pistol);
-                            return (has, "Fetchy-Default carries pistol=" + has +
-                                " (informational: does CE evaluate default-loadout pawns?)");
-                        }, informational: true),
+                            // Nothing in this module fetches weapons; SS's own job giver does.
+                            // If this fails, either SS stopped retrieving or the gate is
+                            // cancelling jobs it should not.
+                            bool has = CarriedWeaponDefs(roomy).Contains(pistol);
+                            return (has, "Roomy carries pistol=" + has);
+                        }),
+                        C("over-capacity-pawn-does-not-fetch", () =>
+                        {
+                            bool has = CarriedWeaponDefs(stuffed).Contains(pistol);
+                            CompInventory inv = stuffed.TryGetComp<CompInventory>();
+                            return (!has, $"Stuffed carries pistol={has} bulk {inv?.currentBulk:F1}/{inv?.capacityBulk:F1}");
+                        }),
                     }
                 }
             };

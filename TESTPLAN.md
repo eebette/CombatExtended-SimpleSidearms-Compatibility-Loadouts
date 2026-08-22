@@ -10,16 +10,21 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
 ```
 
-`supply1` covers, in phases (10 phases, full green 2026-08-20): initial reconcile + physical fetch (memory contents, roles,
+`supply1` covers, in 10 phases: initial reconcile + physical fetch (memory contents, roles,
 mode, gladius stuff fix-up, ammo counts incl. explicit-row suppression), reorder→role
 flip, manual role override sticking, template forget, manual-memory protection through
 template churn, Ad hoc untick parity (stream + physical drop), Ad hoc re-tick, and the
-ammo-for-all-remembered opt-in. `supply2` covers memory-only refetch. Full pass recorded
-2026-08-17 (supply1 8/8 phases, supply2 pass, no log errors).
+ammo-for-all-remembered opt-in. `supply2` covers the CE-capacity gate on Simple Sidearms'
+own weapon retrieval.
 
-**SUPPLY-2 open question answered (2026-08-17 run): CE DOES evaluate default-loadout
-pawns — Fetchy-Default fetched the pistol too.** Refetch reaches pawns with no assigned
-loadout.
+**Correction (2026-08-22).** An earlier run recorded "CE DOES evaluate default-loadout
+pawns — Fetchy-Default fetched the pistol too" and credited this module's virtual slots.
+CE cannot have done that: `JobGiver_UpdateLoadout` wraps its whole body in
+`loadout != null && !loadout.defaultLoadout` at both call sites, so a default-loadout pawn
+never gets a weapon job from it. The fetch almost certainly came from Simple Sidearms'
+own `JobGiver_RetrieveWeapon`, which is in the vanilla think tree, reads only SS memory,
+and is on by default. That discovery is what replaced the refetch feature with the
+capacity gate; the old check was informational and never gated pass/fail.
 
 Two things the harness pinned down that are worth keeping in mind:
 
@@ -82,14 +87,20 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
   (virtual slots feed GetExcessThing too).
 - CE ammo system disabled in CE settings → no derived ammo demand, no errors.
 
-## Weapon refetch (opt-in; staging enables "Refetch ALL remembered" in this profile)
+## Capacity-aware retrieval (SUPPLY-2)
 
-- SUPPLY-2: both pawns remember an uncarried pistol; pistols in a pile. Fetchy-Loadout
-  (assigned empty loadout) must fetch one. Fetchy-Default (default loadout) reveals whether
-  CE evaluates default-loadout pawns at all — record the outcome either way.
-- Loadout-declared weapons refetch natively via their real slots (covered by loadout-sidearms test).
-- Toggle "Refetch ALL remembered" off → no fetch jobs for manual memories.
-- Verify no fetch loop when no pistol exists on the map (job simply not generated).
+This module does not fetch weapons — Simple Sidearms does, on its own, by default. What it
+adds is the capacity limit SS never checks (neither its job giver nor its pickup toil, which
+ends in a bare `innerContainer.TryAdd`).
+
+- SUPPLY-2: both colonists remember an uncarried pistol, with pistols in a pile. "Roomy" has
+  space and must end up carrying one — that also proves the gate is not cancelling retrievals
+  it should allow. "Stuffed" is loaded to CE's bulk limit and must NOT, because CE reports no
+  room. The phase is held open so "did not fetch" is only judged after the other pawn has had
+  as long to act.
+- Toggle the setting off → SS's retrieval runs unmodified, including for the over-capacity
+  pawn (manual check).
+- No fetch loop when no pistol exists on the map (SS simply generates no job).
 
 ## Regression
 
