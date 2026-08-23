@@ -31,40 +31,40 @@ threatened, target-aware ammo and armor-aware melee scoring.
 
 ## Features (each toggleable in mod settings)
 
-**Loadout weapons as sidearms** — weapon defs listed in a CE loadout are auto-remembered as sidearms
-by assigned pawns. *List order is role order*: first weapon = the main (sets SS default
-ranged / preferred melee and combat mode), the rest are backups. Weapons removed from the
-loadout are forgotten again — **whatever the loadout lists, the loadout owns**, including
-weapons Simple Sidearms had already remembered on its own (it auto-remembers anything a pawn
-equips as primary, which is the usual case when you build a loadout around a gun a pawn is
-already carrying). Forgetting the memory is what lets CE clear the weapon out of the
-inventory, so *removed from loadout → removed from the pawn*. Weapons the loadout never
-listed are never touched (tracked per-def in a small saved component). Forget a declared
-weapon in SS's own gizmo and it stays forgotten — that is how you say *carry this but don't
-wield it*, which removing the loadout row cannot express (that would stop the pawn carrying
-it at all). Put it back in the list and the loadout manages it again. A def the loadout
-DOES list is claimed whoever remembered it first — that is the rule that makes "removed from
-loadout, removed from the pawn" hold, since Simple Sidearms auto-remembers any weapon a pawn
-equips as primary. The main-weapon role is the head of one ordered list — *the weapon you put in their hands*,
-then *the loadout's order* — filtered to what the pawn is actually carrying. Equip something
-the loadout doesn't list and it leads while they hold it; stow it and the loadout's first
-takes over; pick it back up and it leads again. Forced weapons and "prefer unarmed" outrank
-the list entirely and are never touched. Generic slots ("any ranged weapon") and multi-count
-weapon slots (trade stock) are ignored — those are hauling/cargo semantics; kit declaration
-is a single copy of a specific def.
+**Loadout weapons as sidearms** — every weapon def listed in a CE loadout is remembered as a
+sidearm by the pawns assigned to it. The first declared ranged weapon becomes their default
+ranged weapon and the first declared melee their preferred melee weapon; the rest are
+backups. Remove a weapon from the loadout and it is forgotten again, which is what lets CE
+clear it out of the inventory — CE's own `dropUndefined` and ad-hoc rules then decide what
+actually happens to it, exactly as they do for any other undeclared item.
 
-**Ammo sustainment** — rides CE's own per-loadout **"Ad hoc"** checkbox. Vanilla CE uses it
-to auto-supply ammo for the *equipped primary* only; with this mod it extends to every
-weapon *declared in that loadout*, at the loadout's own magazine count. Unticked, behavior
-is exactly vanilla CE's curated contract: no ammo rows means no ammo and no demand.
-Derived slots are injected at `Loadout.GetSlotsFor` — the same point CE's fetch *and*
-excess-drop logic consume, and where CE synthesizes its own ad-hoc slots (deduped against
-ours). Hand-added caliber rows (or matching generics) suppress derived demand per ammo def:
-explicit beats derived. A separate off-by-default setting extends derivation to ALL
-remembered weapons (battlefield pickups included) for full-automation players, at a global
-spare-magazine count. Sizing follows CE's own ad-hoc arithmetic, including its mass/bulk
-clamps and the carried-amount band that keeps a pawn one round short from walking to storage
-for one round.
+**Whatever the loadout lists, the loadout owns**, including weapons Simple Sidearms had
+already remembered on its own — it auto-remembers anything a pawn equips as primary, which is
+the usual case when you build a loadout around a gun a pawn already carries. Defs the loadout
+never lists are not touched.
+
+Two things outrank the loadout, both because they are explicit:
+
+- **Forcing a weapon** (SS's force gizmo) and **"prefer unarmed"** are never touched. SS
+  checks a forced weapon before any default, and its role setters would clear these as a side
+  effect, so the projection stays out of the way entirely.
+- **A weapon you equip that the loadout doesn't list** keeps the role for as long as the pawn
+  is carrying it. Put it away and the loadout's first takes over — SS ignores a role pointing
+  at a weapon the pawn hasn't got, and would otherwise fall back to picking by raw DPS.
+
+**Forget a declared weapon in SS's gizmo and it stays forgotten** — that is how you say *carry
+this but don't wield it*, which removing the loadout row cannot express (that would stop the
+pawn carrying it at all). Put it back in the list and the loadout manages it again.
+
+Generic slots ("any ranged weapon") are ignored: there is no specific def to remember.
+
+**Ammo for your sidearms is Combat Extended's job.** Add the ammo to the loadout and CE keeps
+the pawn stocked to that count — the same mechanism it uses for everything else, visible in
+the loadout UI, and it works whether or not the weapon itself is declared. This module used to
+derive that demand automatically off CE's per-loadout "Ad hoc" checkbox; that was wrong.
+Ad-hoc means *this pawn's primary is not in the loadout — keep it and feed it*, so borrowing
+it for declared sidearms both changed CE's drop behaviour for anyone who wanted sidearm ammo
+and forced ammo demand on anyone who wanted ad-hoc for its real purpose.
 
 **Capacity-aware retrieval** — Simple Sidearms already fetches remembered weapons a pawn
 isn't carrying (`JobGiver_RetrieveWeapon`, in the vanilla think tree, on by default), and it
