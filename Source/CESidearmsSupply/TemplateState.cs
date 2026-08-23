@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using SimpleSidearms.rimworld;
 using Verse;
-using static PeteTimesSix.SimpleSidearms.Utilities.Enums;
 
 namespace CESidearmsSupply
 {
@@ -13,60 +11,28 @@ namespace CESidearmsSupply
     /// </summary>
     public class PawnTemplateRecord : IExposable
     {
+        /// <summary>Defs this projection claimed, so it can take back exactly what it gave.</summary>
         public HashSet<ThingDef> weapons = new HashSet<ThingDef>();
-        public ThingDef defaultRanged;   // last default-ranged def WE set (null = we never set it)
-        public ThingDef preferredMelee;  // last preferred-melee def WE set
-        // A role the player set that the pawn is not carrying right now. Shelved rather than
-        // overwritten, so it returns to the head of the list when the weapon does.
-        public ThingDefStuffDefPair? shelvedRanged;
-        public ThingDefStuffDefPair? shelvedMelee;
-        // The defs the loadout declares but the player took back out of the sidearm list.
-        // "Carry it, do not wield it" is an intent the loadout alone cannot express.
+
+        /// <summary>
+        /// Defs the loadout declares but the player took back out of the sidearm list.
+        /// "Carry it, do not wield it" is an intent the loadout alone cannot express.
+        /// </summary>
         public HashSet<ThingDef> suppressed = new HashSet<ThingDef>();
-        public bool modeManaged;
-        public PrimaryWeaponMode lastMode = PrimaryWeaponMode.BySkill;
-        public PrimaryWeaponMode modeBefore = PrimaryWeaponMode.BySkill; // what the pawn had before we claimed the mode
 
         public void ExposeData()
         {
             Scribe_Collections.Look(ref weapons, "weapons", LookMode.Def);
             Scribe_Collections.Look(ref suppressed, "suppressed", LookMode.Def);
-            PairScribe.Look(ref shelvedRanged, "shelvedRanged");
-            PairScribe.Look(ref shelvedMelee, "shelvedMelee");
-            Scribe_Defs.Look(ref defaultRanged, "defaultRanged");
-            Scribe_Defs.Look(ref preferredMelee, "preferredMelee");
-            Scribe_Values.Look(ref modeManaged, "modeManaged", false);
-            Scribe_Values.Look(ref lastMode, "lastMode", PrimaryWeaponMode.BySkill);
-            Scribe_Values.Look(ref modeBefore, "modeBefore", PrimaryWeaponMode.BySkill);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 weapons ??= new HashSet<ThingDef>();
                 suppressed ??= new HashSet<ThingDef>();
-                suppressed.RemoveWhere(d => d == null);
                 // Scribe inserts a null for every def that no longer resolves (a removed
-                // weapon mod), and the collection guard above only covers a null collection.
+                // weapon mod), and the collection guards above only cover a null collection.
                 // Left alone the null is re-saved and outlives the mod that caused it.
                 weapons.RemoveWhere(d => d == null);
-            }
-        }
-    }
-
-    public static class PairScribe
-    {
-        /// <summary>
-        /// ThingDefStuffDefPair is Simple Sidearms' struct and does not implement IExposable,
-        /// so it is scribed as its two defs. A pair whose weapon def no longer resolves is
-        /// dropped rather than kept as a half-null.
-        /// </summary>
-        public static void Look(ref ThingDefStuffDefPair? pair, string label)
-        {
-            ThingDef thing = pair?.thing;
-            ThingDef stuff = pair?.stuff;
-            Scribe_Defs.Look(ref thing, label + "Thing");
-            Scribe_Defs.Look(ref stuff, label + "Stuff");
-            if (Scribe.mode == LoadSaveMode.LoadingVars || Scribe.mode == LoadSaveMode.PostLoadInit)
-            {
-                pair = thing != null ? new ThingDefStuffDefPair(thing, stuff) : (ThingDefStuffDefPair?)null;
+                suppressed.RemoveWhere(d => d == null);
             }
         }
     }
@@ -106,10 +72,7 @@ namespace CESidearmsSupply
         /// <summary>A record claiming nothing and managing nothing is not worth persisting.</summary>
         private static bool IsEmpty(PawnTemplateRecord rec)
         {
-            return rec == null
-                   || (rec.weapons.Count == 0 && rec.suppressed.Count == 0 && rec.defaultRanged == null
-                       && rec.preferredMelee == null && !rec.shelvedRanged.HasValue && !rec.shelvedMelee.HasValue
-                       && !rec.modeManaged);
+            return rec == null || (rec.weapons.Count == 0 && rec.suppressed.Count == 0);
         }
 
         public override void ExposeData()

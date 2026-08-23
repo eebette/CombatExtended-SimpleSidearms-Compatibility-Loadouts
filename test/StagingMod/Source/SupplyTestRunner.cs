@@ -392,11 +392,6 @@ namespace CESupplyTestStaging
                         ThingDef def = Mem(dockie).PreferredMeleeWeapon?.thing;
                         return (def == gladius, "preferredMelee=" + (def?.defName ?? "null"));
                     }),
-                    C("mode-ranged", () =>
-                    {
-                        var mode = Mem(dockie).primaryWeaponMode;
-                        return (mode == PrimaryWeaponMode.Ranged, "mode=" + mode);
-                    }),
                     C("weapons-acquired", () =>
                     {
                         var carried = CarriedWeaponDefs(dockie);
@@ -413,23 +408,6 @@ namespace CESupplyTestStaging
                         return (pair.Value.stuff == carriedGladius.Stuff,
                             $"pair.stuff={pair.Value.stuff?.defName ?? "null"} carried.stuff={carriedGladius.Stuff?.defName ?? "null"}");
                     }),
-                    C("sniper-ammo-demand-exactly-10", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, sniper);
-                        return (n == 10, $"sniper ammo demand={n} (explicit row must suppress derived 2 mags)");
-                    }),
-                    C("shotgun-ammo-demand-2-mags", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, shotgun);
-                        int want = MagOf(shotgun) * 2;
-                        return (n == want, $"shotgun ammo demand={n} want={want}");
-                    }),
-                    C("pistol-ammo-demand-2-mags", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, pistol);
-                        int want = MagOf(pistol) * 2;
-                        return (n == want, $"pistol ammo demand={n} want={want}");
-                    }),
                     C("fetch-forensics", () =>
                     {
                         CompInventory inv = dockie.TryGetComp<CompInventory>();
@@ -443,53 +421,6 @@ namespace CESupplyTestStaging
                             $"bulk={inv?.currentBulk:F1}/{inv?.capacityBulk:F1} weight={inv?.currentWeight:F1}/{inv?.capacityWeight:F1} " +
                             $"job={dockie.CurJobDef?.defName} slots=[{slots}] mapAmmo=[{string.Join(" ", ammoOnMap)}]");
                     }, informational: true),
-                }
-            });
-
-            phases.Add(new Phase
-            {
-                label = "derived-ammo-physically-fetched",
-                deadlineTicks = 40000,
-                mutate = () =>
-                {
-                    // Four CE weapons put a colonist ~60% over bulk capacity, so ammo
-                    // physically cannot fit — proof that CE ACTS on the derived demand
-                    // needs headroom. Shed everything but the pistol, then watch its
-                    // derived rounds actually arrive.
-                    foreach (ThingDef def in new[] { sniper, shotgun, gladius })
-                    {
-                        LoadoutSlot slot = SlotOf(def);
-                        if (slot != null)
-                        {
-                            loadout.RemoveSlot(slot);
-                        }
-                    }
-                    ForceReconcile(dockie);
-                    foreach (ThingWithComps weapon in dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                                                           .Where(w => w.def != pistol).ToList())
-                    {
-                        if (dockie.equipment?.Primary == weapon)
-                        {
-                            dockie.equipment.TryDropEquipment(weapon, out _, dockie.Position, forbid: false);
-                        }
-                        else
-                        {
-                            dockie.inventory.innerContainer.TryDrop(weapon, dockie.Position, dockie.Map,
-                                ThingPlaceMode.Near, out _);
-                        }
-                    }
-                    dockie.TryGetComp<CompInventory>()?.UpdateInventory();
-                    ForceReconcile(dockie);
-                },
-                checks =
-                {
-                    C("pistol-ammo-arrives", () =>
-                    {
-                        int n = CarriedAmmoCount(dockie, pistol);
-                        int want = MagOf(pistol) * loadout.adHocMags;
-                        CompInventory inv = dockie.TryGetComp<CompInventory>();
-                        return (n >= want, $"pistol ammo carried={n} want>={want} bulk={inv?.currentBulk:F1}/{inv?.capacityBulk:F1} job={dockie.CurJobDef?.defName}");
-                    }),
                 }
             });
 
@@ -523,23 +454,48 @@ namespace CESupplyTestStaging
 
             phases.Add(new Phase
             {
-                label = "manual-override-sticks",
+                // The loadout decides among the weapons it declares. Setting the role by hand
+                // to another DECLARED weapon does not stick — reorder the loadout instead.
+                label = "declared-role-override-yields-to-loadout",
                 deadlineTicks = 6000,
                 mutate = () =>
                 {
-                    Mem(dockie).SetRangedWeaponTypeAsDefault(new ThingDefStuffDefPair(pistol, null));
                     MoveTop(sniper);
+                    Mem(dockie).SetRangedWeaponTypeAsDefault(new ThingDefStuffDefPair(pistol, null));
                     ForceReconcile(dockie);
                 },
                 checks =
                 {
-                    C("default-ranged-stays-pistol", () =>
+                    C("loadout-first-wins", () =>
                     {
                         ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
-                        return (def == pistol, "defaultRanged=" + (def?.defName ?? "null"));
+                        return (def == sniper, "defaultRanged=" + (def?.defName ?? "null"));
                     }),
                 }
             });
+
+            phases.Add(new Phase
+            {
+                // Forcing IS the lever, and SS checks it before any default. The projection
+                // must not touch a forced weapon: SetRangedWeaponTypeAsDefault would clear it.
+                label = "forced-weapon-is-never-touched",
+                deadlineTicks = 6000,
+                mutate = () =>
+                {
+                    Mem(dockie).SetWeaponAsForced(new ThingDefStuffDefPair(pistol, null), false);
+                    MoveTop(shotgun);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("force-survives-reconcile", () =>
+                    {
+                        ThingDef forced = Mem(dockie).ForcedWeapon?.thing;
+                        return (forced == pistol, "forced=" + (forced?.defName ?? "null"));
+                    }),
+                }
+            });
+
 
             phases.Add(new Phase
             {
@@ -623,67 +579,6 @@ namespace CESupplyTestStaging
                 }
             });
 
-            phases.Add(new Phase
-            {
-                label = "adhoc-untick-parity",
-                deadlineTicks = 20000,
-                mutate = () => { loadout.adHoc = false; ForceReconcile(dockie); },
-                checks =
-                {
-                    C("stream-no-derived-pistol-ammo", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, pistol);
-                        return (n == 0, $"pistol ammo demand in stream={n}");
-                    }),
-                    C("stream-sniper-explicit-persists", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, sniper);
-                        return (n == 10, $"sniper ammo demand in stream={n} want=10");
-                    }),
-                    C("physical-pistol-ammo-dropped", () =>
-                    {
-                        int n = CarriedAmmoCount(dockie, pistol);
-                        return (n == 0, $"pistol ammo carried={n} (excess-drop should shed derived ammo)");
-                    }),
-                }
-            });
-
-            phases.Add(new Phase
-            {
-                label = "adhoc-retick",
-                deadlineTicks = 6000,
-                mutate = () => { loadout.adHoc = true; ForceReconcile(dockie); },
-                checks =
-                {
-                    C("stream-derived-pistol-ammo-returns", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, pistol);
-                        int want = MagOf(pistol) * loadout.adHocMags;
-                        return (n == want, $"pistol ammo demand in stream={n} want={want}");
-                    }),
-                }
-            });
-
-            phases.Add(new Phase
-            {
-                label = "ammo-for-all-remembered",
-                deadlineTicks = 6000,
-                mutate = () =>
-                {
-                    CESidearmsSupply.SupplyMod.Settings.ammoForAllRemembered = true;
-                    Mem(dockie).RememberedWeapons.Add(new ThingDefStuffDefPair(revolver, null));
-                },
-                checks =
-                {
-                    C("stream-revolver-ammo-at-global-count", () =>
-                    {
-                        int n = StreamAmmoCount(dockie, revolver);
-                        int want = MagOf(revolver) * CESidearmsSupply.SupplyMod.Settings.spareMagazines;
-                        return (n == want, $"revolver ammo demand in stream={n} want={want}");
-                    }),
-                }
-            });
-
             // The role is the head of [player's own choice] ++ [loadout order], filtered to
             // what the pawn actually carries. A weapon the player equips outranks the loadout
             // while they hold it; put it away and the loadout's first takes over; pick it back
@@ -695,7 +590,6 @@ namespace CESupplyTestStaging
                 deadlineTicks = 6000,
                 mutate = () =>
                 {
-                    CESidearmsSupply.SupplyMod.Settings.ammoForAllRemembered = false;
                     Mem(dockie).RememberedWeapons.RemoveAll(p => p.thing == revolver);
                     // An undeclared weapon, equipped: exactly what SS does on a battlefield pickup.
                     playerPick = (ThingWithComps)ThingMaker.MakeThing(D("Gun_HeavySMG"));
@@ -729,35 +623,15 @@ namespace CESupplyTestStaging
                         ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
                         return (def == sniper, $"default={def?.defName ?? "none"} want={sniper.defName}");
                     }),
-                    C("displaced-pick-is-shelved-not-lost", () =>
+                    C("nothing-shelved-to-restore", () =>
                     {
+                        // Deliberately not remembered: the player expressed the choice by
+                        // EQUIPPING. Simple Sidearms' retrieval brings a weapon back to the
+                        // inventory, not to their hands, so restoring it as the role would be
+                        // inferring intent from an automatic action. Equip it again to lead.
                         var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        ThingDef shelved = rec?.shelvedRanged?.thing;
-                        return (shelved == playerPick.def, $"shelved={shelved?.defName ?? "none"}");
-                    }),
-                }
-            });
-
-            phases.Add(new Phase
-            {
-                label = "pick-returns-to-head-when-carried-again",
-                deadlineTicks = 6000,
-                mutate = () =>
-                {
-                    dockie.inventory.innerContainer.TryAdd(playerPick, true);
-                    ForceReconcile(dockie);
-                },
-                checks =
-                {
-                    C("head-is-the-player-pick-again", () =>
-                    {
-                        ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
-                        return (def == playerPick.def, $"default={def?.defName ?? "none"} want={playerPick.def.defName}");
-                    }),
-                    C("shelf-cleared", () =>
-                    {
-                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        return (rec?.shelvedRanged == null, $"shelved={rec?.shelvedRanged?.thing?.defName ?? "none"}");
+                        bool claimed = rec != null && rec.weapons.Contains(playerPick.def);
+                        return (!claimed, $"undeclared pick claimed={claimed}");
                     }),
                 }
             });

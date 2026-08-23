@@ -5,26 +5,25 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using CombatExtended;
+using SimpleSidearms.rimworld;
 using HarmonyLib;
 using Verse;
 
 namespace CESupplyTestStaging
 {
     /// <summary>
-    /// In-game benchmark for the Loadout.GetSlotsFor postfix, run with
+    /// In-game benchmark for the loadout-sidearm reconcile, run with
     ///   -celoadsave=SUPPLY-1-loadout-sidearms -ceassert=supplybench
     ///
-    /// Combat Extended benchmarks inside RimWorld rather than in a desktop harness, so this
-    /// measures the calls CE actually makes on a loaded save with a real ad-hoc loadout.
+    /// Two questions, both of which decide whether a single reconciling hook is the right
+    /// trigger, and neither of which should be answered by reasoning about the code:
     ///
-    /// Three shapes, because they cost different things:
-    ///   full        — enumerate every slot (what GetPrioritySlot does in the worst case)
-    ///   firstOnly   — FirstOrDefault, what Utility_HoldTracker.GetExcessEquipment does
-    ///   anyMatch    — Any(predicate), what JobGiver_UpdateLoadout.GetUpdateLoadoutJob does
+    ///   cost — microseconds per reconcile, with the module's patches active and again with
+    ///          them removed, in one process so the save and JIT state match
+    ///   rate — how often CE actually calls it per colonist, counted over a live sample
+    ///          rather than derived from CE's 1800-tick cooldown
     ///
-    /// The last two are the point: CE wrote them to stop early, and a postfix that
-    /// materialises the stream takes that away. Each is measured with the module's patches
-    /// active and again with them removed, in one process, so the save and JIT state match.
+    /// Combat Extended benchmarks inside RimWorld rather than in a desktop harness.
     /// </summary>
     public class SupplyBenchRunnerComponent : GameComponent
     {
@@ -33,6 +32,13 @@ namespace CESupplyTestStaging
         // work: 200k iterations puts each round in the tens of milliseconds.
         private const int TimedIterations = 200000;
         private const int Rounds = 5;
+        private const float FrameBudgetMs = 1000f / 60f;
+        private const int ProjectedColonists = 20;
+        /// <summary>Live sample of CE's real call rate before anything is timed.</summary>
+        private const int SampleTicks = 6000;
+
+        private static int observedCalls;
+        private double observedRate;
 
         private string scenario;
         private bool active;
@@ -70,6 +76,14 @@ namespace CESupplyTestStaging
             {
                 return; // let CE finish its first inventory passes
             }
+            // Count real invocations for a while before timing anything: the cost only
+            // matters multiplied by the rate, and the rate is CE's to decide.
+            if (Find.TickManager.TicksGame - startTick < 120 + SampleTicks)
+            {
+                return;
+            }
+            int colonists = Math.Max(1, Find.CurrentMap?.mapPawns?.FreeColonistsSpawnedCount ?? 1);
+            observedRate = observedCalls * 1000.0 / SampleTicks / colonists;
             done = true;
             try
             {
@@ -95,21 +109,34 @@ namespace CESupplyTestStaging
             Loadout loadout = pawn.GetLoadout();
             results.Add($"  \"pawn\": \"{Escape(pawn.LabelShort)}\"");
             results.Add($"  \"loadoutSlots\": {loadout.Slots.Count}");
-            results.Add($"  \"adHoc\": {(loadout.adHoc ? "true" : "false")}");
+            results.Add($"  \"rememberedWeapons\": {CompSidearmMemory.GetMemoryCompForPawn(pawn)?.RememberedWeapons?.Count ?? 0}");
             results.Add($"  \"timedIterations\": {TimedIterations}");
+            results.Add($"  \"observedCallsPerColonistPer1000Ticks\": {observedRate:F2}");
+            results.Add($"  \"observedSampleTicks\": {SampleTicks}");
 
-            ThingDef probe = loadout.Slots.Select(s => s.thingDef).FirstOrDefault(d => d != null);
+            // The reconcile is a prefix on TryGiveJob, so calling it is what the game does.
+            // The returned job is discarded; physical work stays with the pawn's think tree.
+            var giver = new JobGiver_UpdateLoadout();
+            Func<int> reconcile = () => giver.TryGiveJob(pawn) != null ? 1 : 0;
 
-            Func<int> full = () => loadout.GetSlotsFor(pawn).Count();
-            Func<int> firstOnly = () => loadout.GetSlotsFor(pawn).FirstOrDefault() != null ? 1 : 0;
-            Func<int> anyMatch = () => loadout.GetSlotsFor(pawn).Any(s => s.thingDef == probe) ? 1 : 0;
-
-            Report("patched", Measure(full), Measure(firstOnly), Measure(anyMatch));
-
+            double patched = Measure(reconcile);
             new Harmony("eebette.CESidearmsSupplyBench").UnpatchAll("eebette.CESidearmsSupply");
             Log.Message("[SupplyBench] Module patches removed; measuring stock CE.");
+            double stock = Measure(reconcile);
 
-            Report("stock", Measure(full), Measure(firstOnly), Measure(anyMatch));
+            double overhead = patched - stock;
+            results.Add($"  \"patchedUsPerCall\": {patched:F3}");
+            results.Add($"  \"stockUsPerCall\": {stock:F3}");
+            results.Add($"  \"reconcileOverheadUsPerCall\": {overhead:F3}");
+
+            // What that costs at colony scale, at the rate CE was actually observed to call it.
+            double msPerTick = overhead * ProjectedColonists * (observedRate / 1000.0) / 1000.0;
+            results.Add($"  \"projectedColonists\": {ProjectedColonists}");
+            results.Add($"  \"msPerTickAtScale\": {msPerTick:F5}");
+            results.Add($"  \"pctOfFrameAtScale\": {msPerTick / FrameBudgetMs * 100.0:F4}");
+            Log.Message($"[SupplyBench] reconcile overhead {overhead:F3} us/call, observed {observedRate:F2} calls "
+                        + $"per colonist per 1000 ticks → {msPerTick / FrameBudgetMs * 100.0:F4}% of a 60fps frame "
+                        + $"at {ProjectedColonists} colonists");
         }
 
         /// <summary>Best-of-N: the minimum is the least noisy estimate; GC only adds time.</summary>
@@ -162,9 +189,34 @@ namespace CESupplyTestStaging
             Log.Message("[SupplyBench] Wrote " + path);
         }
 
+        internal static void CountCall()
+        {
+            observedCalls++;
+        }
+
         private static string Escape(string s)
         {
             return s?.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+        }
+    }
+
+    /// <summary>Counts how often CE actually reaches the reconcile, for the rate half.</summary>
+    [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob")]
+    public static class SupplyBenchCallCounter
+    {
+        public static bool Prepare()
+        {
+            return GenCommandLine.TryGetCommandLineArg("ceassert", out string scenario)
+                   && !scenario.NullOrEmpty() && scenario.StartsWith("supplybench");
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(Pawn pawn)
+        {
+            if (pawn != null && pawn.IsColonist)
+            {
+                SupplyBenchRunnerComponent.CountCall();
+            }
         }
     }
 
@@ -178,6 +230,11 @@ namespace CESupplyTestStaging
             {
                 return;
             }
+            // The staging assembly has no Harmony bootstrap of its own, so the call counter
+            // below is only applied for bench runs — and without this it silently never runs,
+            // which is exactly how the first measurement reported a rate of 0.00.
+            new Harmony("eebette.CESidearmsSupplyBench").PatchAll(typeof(SupplyBenchBoot).Assembly);
+
             if (GenCommandLine.TryGetCommandLineArg("celoadsave", out string save) && !save.NullOrEmpty())
             {
                 LongEventHandler.ExecuteWhenFinished(() => GameDataSaveLoader.LoadGame(save));

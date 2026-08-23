@@ -10,69 +10,48 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
 ```
 
-`supply1` covers, in 15 phases: initial reconcile + physical fetch (memory contents, roles,
-mode, gladius stuff fix-up, ammo counts incl. explicit-row suppression), reorder→role
-flip, manual role override sticking, template forget, manual-memory protection through
-template churn, Ad hoc untick parity (stream + physical drop), Ad hoc re-tick, and the
-ammo-for-all-remembered opt-in. `supply2` covers the CE-capacity gate on Simple Sidearms'
-own weapon retrieval. The last five `supply1` phases cover the role model and the
-suppression rule: a player-equipped weapon heads the list while carried, the loadout's
-first takes over when it is stowed (with the displaced choice shelved), it returns when
-carried again, and forgetting a declared weapon in SS's gizmo sticks instead of being
-re-claimed on the next pass.
+`supply1` covers, in 11 phases: initial reconcile and physical fetch (memory contents,
+roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
+yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
+manual-memory protection through template churn, pre-existing memory claimed by the loadout,
+an undeclared equipped weapon keeping the role while carried and the loadout taking over when
+it is stowed, and the gizmo-forget suppression sticking and then resuming when the weapon is
+put back in the list. `supply2` covers the CE-capacity gate on Simple Sidearms' own weapon
+retrieval.
 
 ## Benchmark
 
-`./test/run-supply-bench.sh [label]` loads SUPPLY-1 and times `Loadout.GetSlotsFor` in the
-three shapes CE actually uses — full enumeration, `FirstOrDefault`, `Any(predicate)` — with
-the module's patches active and again with them removed, in one process. 200k iterations x 5
-rounds, best-of; anything shorter measures scheduler noise at these sub-microsecond costs.
+`./test/run-supply-bench.sh [label]` loads SUPPLY-1 and answers the two questions that decide
+whether one reconciling hook is the right trigger:
 
-Measured 2026-08-22 (CE 16.7.3.0, SS v1.6), before and after making the postfix lazy:
+- **cost** — microseconds per reconcile, with the module's patches active and again with them
+  removed, in one process so the save and JIT state match
+- **rate** — how often CE actually reaches the reconcile per colonist, counted live over 6000
+  ticks rather than derived from CE's 1800-tick cooldown
 
-| | full | firstOnly | anyMatch |
-|---|---|---|---|
-| eager postfix | 0.583 us | 0.661 us | 0.660 us |
-| lazy postfix | 0.704 us | 0.405 us | 0.410 us |
-| stock CE | 0.289 us | 0.198 us | 0.194 us |
+The second matters because cost only counts multiplied by rate, and the rate is CE's to
+decide: it registers `JobGiver_UpdateLoadout` in the colonist behaviour tree's priority
+sorter, whose `GetPriority` bids 30f once the cooldown lapses.
 
-Eagerly materialising the stream made the short-circuit shapes cost as much as full
-enumeration, which is what CE's callers are written to avoid. Overhead on those paths fell
-from +0.463 us to +0.214 us. Full enumeration costs ~0.12 us more than before (one extra
-iterator layer) — the right side of the trade, since `GetExcessEquipment` runs from
-`GetPriority` on every think-tree evaluation while full enumeration only happens when CE is
-hunting for work.
+Measured 2026-08-23 (CE 16.7.3.0, SS v1.6):
 
-**Correction (2026-08-22).** An earlier run recorded "CE DOES evaluate default-loadout
-pawns — Fetchy-Default fetched the pistol too" and credited this module's virtual slots.
-CE cannot have done that: `JobGiver_UpdateLoadout` wraps its whole body in
-`loadout != null && !loadout.defaultLoadout` at both call sites, so a default-loadout pawn
-never gets a weapon job from it. The fetch almost certainly came from Simple Sidearms'
-own `JobGiver_RetrieveWeapon`, which is in the vanilla think tree, reads only SS memory,
-and is on by default. That discovery is what replaced the refetch feature with the
-capacity gate; the old check was informational and never gated pass/fail.
+| | |
+|---|---|
+| reconcile overhead | **5.67 us/call** (183.45 patched vs 177.79 stock, whole TryGiveJob path) |
+| observed rate | **0.67 calls per colonist per 1000 ticks** (~one every 1500 ticks) |
+| cost at 20 colonists | **0.0005% of a 60fps frame** |
 
-Two things the harness pinned down that are worth keeping in mind:
+That settles the trigger question: a single reconciling hook costs three orders of magnitude
+less than the 1%-of-frame bar set before measuring, so it stays, and no dirty-check or
+event-driven fan-out is warranted. The observed rate also confirms the reconcile is not
+player-triggered — nobody touched the game during the sample.
 
-- **The loadout owns what it lists.** Simple Sidearms auto-remembers any weapon a
-  pawn equips as primary, so a loadout built around a gun the pawn already
-  carries used to leave that gun unclaimed by the projection — and removing it
-  from the loadout would leave it remembered, hence exempt from CE's drop,
-  forever. Reconcile now claims every listed def regardless of who remembered it
-  first; `preexisting-memory-claimed-by-loadout` is the regression test (memory
-  forgotten on removal AND CE free to drop).
-- **Four CE weapons put a colonist ~60% over bulk capacity**, so physical ammo
-  cannot fit while the whole staged kit is carried. Phase 1 therefore asserts
-  ammo DEMAND (the slot stream), and a dedicated phase sheds the kit down to the
-  pistol before asserting that derived rounds physically arrive. The old
-  carriage-based assertions in phase 1 could only ever pass by luck of fetch
-  ordering.
+A note on the harness, since it produced a wrong answer first: the staging assembly has no
+Harmony bootstrap of its own, so the call counter was never applied and the first run reported
+a rate of 0.00. A rate of zero should have been read as "the instrument is broken", not as
+"CE never calls it" — the same mistake shape as the 5k-iteration run that reported
+FirstOrDefault costing more than full enumeration.
 
-Remaining MANUAL checks (visual/config-level, not covered by the runner): SS gizmo
-rendering of remembered weapons; "CE ammo system disabled" settings run; save/load
-mid-state persistence; removing-the-mod-mid-save leaves only inert SS data. Manual
-loop: `../CombatExtended-SimpleSidearms Compatibility Patch/test/run-test.sh`, load a
-SUPPLY save, unpause.
 
 ## Loadout weapons as sidearms
 
