@@ -33,10 +33,11 @@ rm -f "$RESULT"
 timeout --signal=TERM 20m "${GS[@]}" "$RIMWORLD" -savedatafolder="$SAVEDATA" \
     "-celoadsave=$SAVE" "-ceassert=$SCENARIO" || true
 
-if [[ -f "$RESULT" ]]; then
-    echo "== results: $RESULT =="
-    cat "$RESULT"
-else
+if [[ ! -f "$RESULT" ]]; then
     echo "== NO RESULTS FILE — runner never finished; check Player.log ==" >&2
     exit 1
 fi
+
+# The verdict decides the exit code. Printing the file and stopping there is how
+# this script spent its life reporting success for runs in which every phase failed.
+exec "$(dirname "$0")/verdict.py" "$RESULT"

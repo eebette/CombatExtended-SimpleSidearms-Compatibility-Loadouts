@@ -9,6 +9,16 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ./test/run-supply-assert.sh supply1 SUPPLY-1-loadout-sidearms
 ```
 
+`run-supply-assert.sh` exits non-zero when the run did not pass — via `test/verdict.py`,
+which also prints the failing checks (and that phase's informational checks, which exist to
+diagnose exactly that) rather than dumping sixteen phases of JSON. It fails on a crash, on a
+failed phase, on a phase that was never reached, and on an empty suite.
+
+That last pair matters: the runner's own `"passed"` is `phases.All(p => !p.failed)`, and a
+phase that was never reached is not marked failed — so a run that stopped early reports
+`passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
+every green result it ever produced meant only that a file had been written.
+
 `supply1` covers, in 16 phases: initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,

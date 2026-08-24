@@ -28,10 +28,15 @@ rm -f "$RESULT"
 timeout --signal=TERM 20m "${GS[@]}" "$RIMWORLD" -savedatafolder="$SAVEDATA" \
     "-celoadsave=SUPPLY-1-loadout-sidearms" "-ceassert=$LABEL" || true
 
-if [[ -f "$RESULT" ]]; then
-    echo "== results: $RESULT =="
-    cat "$RESULT"
-else
+if [[ ! -f "$RESULT" ]]; then
     echo "== NO RESULTS FILE — bench never finished; check Player.log ==" >&2
+    exit 1
+fi
+
+echo "== results: $RESULT =="
+cat "$RESULT"
+# A benchmark has no pass/fail, but it can still have measured nothing.
+if grep -q '"crashed"' "$RESULT"; then
+    echo "== BENCH CRASHED — the numbers above are not measurements ==" >&2
     exit 1
 fi
