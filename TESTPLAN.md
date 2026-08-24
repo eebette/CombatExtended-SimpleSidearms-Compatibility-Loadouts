@@ -9,13 +9,20 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ./test/run-supply-assert.sh supply1 SUPPLY-1-loadout-sidearms
 ```
 
-`supply1` covers, in 11 phases: initial reconcile and physical fetch (memory contents,
+`supply1` covers, in 16 phases: initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
 an undeclared equipped weapon keeping the role while carried and the loadout taking over when
 it is stowed, and the gizmo-forget suppression sticking and then resuming when the weapon is
 put back in the list.
+
+The last five phases are the regressions from the 2026-08-23 review: an ordinary equip must
+not be read as a deliberate forget, a forced weapon must survive its row leaving the loadout,
+a declared-but-uncarried weapon must not be remembered with a guessed material, a hand-cleared
+role must stay cleared, and deleting the loadout must not wipe anything. Each is a `negative`
+check — re-evaluated on every poll and failing the phase the moment it trips, rather than
+latching on the first sample.
 
 ## Benchmark
 
@@ -89,6 +96,19 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 - Excess-drop check: pawn carrying derived ammo does NOT drop it during loadout enforcement
   (virtual slots feed GetExcessThing too).
 - CE ammo system disabled in CE settings → no derived ammo demand, no errors.
+
+## Known gaps
+
+- **The gizmo observer's own diff is only half covered.** Tests drive it by calling the
+  patch's prefix/postfix around the change SS's branch would make, so the intent capture is
+  real code under test, but SS's UI branch dispatch is not. Confirm by hand in game: click a
+  weapon in the sidearm gizmo twice (first click clears its role, second forgets it) and check
+  the pawn does not re-acquire it as a sidearm within the minute.
+- **No save/load round trip.** `SupplyGameComponent.ExposeData` is untested; claimed pairs,
+  forgotten defs and both role vetoes should survive a reload, and the prune should drop
+  records for the dead, the departed and the empty.
+- **No settings-toggle coverage.** Turning the feature off should release every claimed pair;
+  turning it back on should re-claim from scratch.
 
 ## Regression
 

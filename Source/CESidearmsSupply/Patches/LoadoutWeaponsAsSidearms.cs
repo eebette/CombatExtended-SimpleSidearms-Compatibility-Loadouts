@@ -4,6 +4,7 @@ using System.Linq;
 using CombatExtended;
 using HarmonyLib;
 using PeteTimesSix.SimpleSidearms;
+using PeteTimesSix.SimpleSidearms.Utilities;
 using RimWorld;
 using SimpleSidearms.rimworld;
 using Verse;
@@ -17,20 +18,18 @@ namespace CESidearmsSupply.Patches
     /// becomes the pawn's default ranged weapon, the first declared melee their preferred
     /// melee weapon.
     ///
-    /// THE LOADOUT IS THE AUTHORITY. A def the loadout lists is claimed regardless of who
-    /// remembered it first — SS auto-remembers anything a pawn equips as primary, so a loadout
-    /// built around a gun the pawn already carries would otherwise never be claimed, and
-    /// removing that row would leave the gun remembered (and so exempt from CE's drop) forever.
-    /// Defs the loadout never lists are not touched.
+    /// THE LOADOUT IS THE AUTHORITY over the defs it lists, and only those. It claims a def
+    /// regardless of who remembered it first, because SS auto-remembers anything a pawn
+    /// equips and a loadout built around a gun the pawn already carries would otherwise never
+    /// be claimed. Player intent still outranks it: a forced weapon, a hand-cleared role, and
+    /// a weapon taken out of the list by hand are all honoured, and each is recorded from the
+    /// gizmo rather than guessed at (see GizmoIntent).
     ///
     /// Reconciled rather than event-driven, deliberately. SS and CE both mutate this state and
-    /// so do other mods: SS alone has five writers to its remembered list, one of which
-    /// materialises the entire list from the pawn's carried weapons the first time anything
-    /// reads it. A missed event is permanent; a missed reconcile cycle lasts until the next
-    /// one. This is not player-triggered — CE registers JobGiver_UpdateLoadout in the colonist
-    /// behaviour tree's priority sorter and its GetPriority bids 30f once the 1800-tick
-    /// cooldown lapses, so every colonist reconciles about twice a minute on their own, and a
-    /// save loaded in any state converges on the pawn's first job selection.
+    /// so do other mods; a missed event is permanent, a missed reconcile cycle lasts until the
+    /// next one. CE registers JobGiver_UpdateLoadout in the colonist behaviour tree, so this
+    /// runs about twice a minute per colonist on its own — measured at 0.67 calls per colonist
+    /// per 1000 ticks, 0.0005% of a 60fps frame at 20 colonists.
     /// </summary>
     [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob")]
     public static class JobGiver_UpdateLoadout_TryGiveJob_Patch
@@ -41,7 +40,8 @@ namespace CESidearmsSupply.Patches
         /// </summary>
         public static bool Prepare()
         {
-            if (AccessTools.Method(typeof(JobGiver_UpdateLoadout), "TryGiveJob") != null)
+            if (AccessTools.Method(typeof(JobGiver_UpdateLoadout), "TryGiveJob",
+                                   new[] { typeof(Pawn) }) != null)
             {
                 return true;
             }
@@ -57,15 +57,7 @@ namespace CESidearmsSupply.Patches
             {
                 return;
             }
-            try
-            {
-                Reconcile(pawn);
-            }
-            catch (Exception e)
-            {
-                Log.ErrorOnce($"[Sidearms&Supply] Loadout-sidearm reconcile failed for {pawn}: {e}",
-                              0x53535231 ^ (pawn?.thingIDNumber ?? 0));
-            }
+            Reconcile(pawn);
         }
 
         private static void Reconcile(Pawn pawn)
@@ -81,182 +73,244 @@ namespace CESidearmsSupply.Patches
                 return;
             }
 
-            // Every weapon row declares a sidearm. Count is not a filter: a row of five pistols
-            // still says "this pawn should have a pistol", and SS memory is per type. Generic
-            // rows ("any ranged weapon") carry no def, so there is no type to remember.
             Loadout loadout = pawn.GetLoadout();
-            List<ThingDef> declared = loadout != null && !loadout.defaultLoadout
-                ? loadout.Slots.Where(s => s.thingDef != null && s.thingDef.IsWeapon)
-                          .Select(s => s.thingDef).Distinct().ToList()
-                : new List<ThingDef>();
-
             PawnTemplateRecord rec = comp.GetRecord(pawn, create: false);
+
+            // No loadout means NO OPINION, not "declares nothing". CE reassigns every pawn of
+            // a deleted loadout to the default one by writing its dictionary directly
+            // (LoadoutManager.RemoveLoadout), and deleting a loadout is an unconfirmed
+            // float-menu click — so treating that as an empty declaration would wipe every
+            // sidearm on every pawn that used it, silently, with no undo.
+            if (loadout == null || loadout.defaultLoadout)
+            {
+                if (rec != null && !pawn.IsColonist)
+                {
+                    comp.RemoveRecord(pawn);
+                }
+                return;
+            }
+
+            // GetSlotsFor, not Slots: on an ad-hoc loadout CE synthesises a slot for the
+            // equipped primary, and both of CE's own readers use it. Reading raw Slots makes
+            // the two mods disagree about what the same loadout says. It is a lazy iterator
+            // over live state, so materialise it now.
+            List<ThingDef> declared;
+            try
+            {
+                declared = loadout.GetSlotsFor(pawn)
+                                  .Where(s => s?.thingDef != null && s.thingDef.IsWeapon
+                                              // A platform row specifies attachments; SS matches
+                                              // def+stuff only, so claiming one would have it fetch
+                                              // a platform built to the wrong spec.
+                                              && !s.isWeaponPlatform)
+                                  .Select(s => s.thingDef).Distinct().ToList();
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce($"[Sidearms&Supply] Could not read {pawn}'s loadout slots: {e}",
+                              0x53535235 ^ pawn.thingIDNumber);
+                return;
+            }
+
             if (rec == null && declared.Count == 0)
             {
-                return; // nothing claimed and nothing to claim
+                return;
             }
             rec ??= comp.GetRecord(pawn, create: true);
 
-            ForgetUndeclared(memory, rec, declared);
-            ClaimDeclared(pawn, memory, rec, declared);
-            AssertRoles(pawn, memory, declared);
+            // Read the forced state once, before anything can clear it. SS nulls a role as a
+            // side effect of forgetting its last copy, so a guard that reads it after the
+            // forget phase is reading wreckage.
+            ThingDefStuffDefPair? forced = memory.ForcedWeapon;
+            ThingDefStuffDefPair? forcedDrafted = memory.ForcedWeaponWhileDrafted;
+
+            Step(pawn, () => ForgetUndeclared(memory, rec, declared, forced, forcedDrafted), "forget");
+            Step(pawn, () => ClaimDeclared(pawn, memory, rec, declared), "claim");
+            Step(pawn, () => AssertRoles(pawn, memory, rec, declared, forced), "roles");
         }
 
         /// <summary>
-        /// The template taketh away: defs this projection claimed that the loadout no longer
-        /// declares are forgotten. Nothing is dropped here — forgetting ends the compatibility
-        /// patch's drop exemption, and CE's own rules then decide, honouring that loadout's
-        /// dropUndefined and adHoc settings exactly as they do for any other undeclared item.
+        /// Phases are wrapped one at a time: the forget phase commits before the claim phase
+        /// starts, so a throw inside claim must not also cost the roles. Keyed per pawn AND
+        /// per phase so a second, different failure is not swallowed by the first.
         /// </summary>
-        private static void ForgetUndeclared(CompSidearmMemory memory, PawnTemplateRecord rec, List<ThingDef> declared)
+        private static void Step(Pawn pawn, Action step, string label)
         {
-            foreach (ThingDef gone in rec.weapons.Where(d => !declared.Contains(d)).ToList())
+            try
             {
-                // Drain rather than iterate a snapshot. SS's list holds duplicates on purpose,
-                // and ForgetSidearmMemory removes ONE occurrence and only clears the role
-                // fields once the pair is fully absent — so forgetting once per distinct pair
-                // left the surplus copies remembered forever with no owner.
-                int guard = 0;
-                while (memory.RememberedWeapons.Any(p => p.thing == gone) && guard++ < 64)
+                step();
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce($"[Sidearms&Supply] Loadout-sidearm {label} failed for {pawn}: {e}",
+                              0x53535231 ^ (pawn?.thingIDNumber ?? 0) ^ label.GetHashCode());
+            }
+        }
+
+        /// <summary>
+        /// The template taketh away: pairs this projection claimed whose def the loadout no
+        /// longer declares are forgotten. Exactly those pairs — a different material of the
+        /// same def, added by the player, is not ours to delete. Nothing is dropped here;
+        /// forgetting ends the compat patch's drop exemption and CE's own rules take over.
+        /// </summary>
+        private static void ForgetUndeclared(CompSidearmMemory memory, PawnTemplateRecord rec,
+                                             List<ThingDef> declared, ThingDefStuffDefPair? forced,
+                                             ThingDefStuffDefPair? forcedDrafted)
+        {
+            foreach (ThingDefStuffDefPair gone in rec.claimed.Where(p => !declared.Contains(p.thing)).ToList())
+            {
+                // A forced weapon outranks the loadout. Leaving the row does not revoke the
+                // player's most explicit instruction, and forgetting the last copy would clear
+                // it as a side effect with nothing to tell them it happened.
+                if (gone == forced || gone == forcedDrafted)
                 {
-                    memory.ForgetSidearmMemory(memory.RememberedWeapons.First(p => p.thing == gone));
+                    continue;
                 }
-                if (!memory.RememberedWeapons.Any(p => p.thing == gone))
+                if (memory.RememberedWeapons.Contains(gone))
                 {
-                    rec.weapons.Remove(gone);
+                    memory.ForgetSidearmMemory(gone);
                 }
+                rec.claimed.Remove(gone);
             }
             // Suppression follows the row: remove a weapon and re-add it and it is managed
             // again, rather than staying silently suppressed forever.
-            rec.suppressed.RemoveWhere(d => !declared.Contains(d));
+            rec.forgotten.RemoveWhere(d => !declared.Contains(d));
         }
 
         /// <summary>
-        /// The template giveth: every declared def is remembered, retargeted to the material
-        /// the pawn actually carries.
-        ///
-        /// With one exception, and it is the player's. A loadout row says CARRY; membership in
-        /// the sidearm list says AND BE WILLING TO SWITCH TO IT. Forgetting a declared weapon
-        /// in SS's gizmo is the only way to say the first without the second — removing the row
-        /// would stop the pawn carrying it at all — so a def this projection claimed and the
-        /// player then forgot is suppressed rather than re-claimed.
+        /// The template giveth — but only for a weapon the pawn actually holds. A declared
+        /// weapon the pawn has not got yet is CE's problem: the loadout row already makes CE
+        /// fetch it, and guessing a material here would send SS chasing a specific stuff the
+        /// loadout never asked for, since SS matches pairs exactly and CE matches defs.
         /// </summary>
-        private static void ClaimDeclared(Pawn pawn, CompSidearmMemory memory, PawnTemplateRecord rec, List<ThingDef> declared)
+        private static void ClaimDeclared(Pawn pawn, CompSidearmMemory memory, PawnTemplateRecord rec,
+                                          List<ThingDef> declared)
         {
             List<ThingWithComps> carriedWeapons = pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true);
-            var rememberedOfDef = new List<ThingDefStuffDefPair>();
 
             foreach (ThingDef def in declared)
             {
-                rememberedOfDef.Clear();
-                for (int i = 0; i < memory.RememberedWeapons.Count; i++)
+                if (rec.forgotten.Contains(def))
                 {
-                    if (memory.RememberedWeapons[i].thing == def)
-                    {
-                        rememberedOfDef.Add(memory.RememberedWeapons[i]);
-                    }
+                    continue; // the player said carry it, do not wield it
                 }
-
-                if (rememberedOfDef.Count == 0 && rec.weapons.Contains(def))
+                ThingWithComps carried = carriedWeapons.FirstOrDefault(w => w.def == def);
+                if (carried == null)
                 {
-                    rec.weapons.Remove(def);
-                    rec.suppressed.Add(def);
                     continue;
                 }
-                if (rec.suppressed.Contains(def))
+                ThingDefStuffDefPair pair = carried.toThingDefStuffDefPair();
+
+                if (memory.RememberedWeapons.Contains(pair))
                 {
-                    if (rememberedOfDef.Count == 0)
+                    if (!rec.claimed.Contains(pair))
                     {
-                        continue; // still out of the list; the row keeps CE hauling it
+                        rec.claimed.Add(pair); // the loadout owns what it lists, whoever got there first
                     }
-                    rec.suppressed.Remove(def); // put back by hand — manage it again
+                }
+                else
+                {
+                    // SS decides what may be a sidearm at all — slot count, mass limits, the
+                    // selection whitelist, the pacifist rule — and its retrieval never
+                    // re-checks. Writing straight into the list would make those settings
+                    // silently void for anything a loadout happens to name.
+                    if (!StatCalculator.CanPickupSidearmType(pair, pawn, out string _))
+                    {
+                        continue;
+                    }
+                    memory.RememberedWeapons.Add(pair);
+                    rec.claimed.Add(pair);
                 }
 
-                ThingWithComps carried = null;
-                for (int i = 0; i < carriedWeapons.Count; i++)
+                // The loadout asked for a knife and the pawn now carries a plasteel one:
+                // release our claim on the material they no longer have. Only ours.
+                foreach (ThingDefStuffDefPair stale in rec.claimed
+                             .Where(p => p.thing == def && p != pair
+                                         && !carriedWeapons.Any(w => w.toThingDefStuffDefPair() == p)).ToList())
                 {
-                    if (carriedWeapons[i].def == def)
+                    if (memory.RememberedWeapons.Contains(stale))
                     {
-                        carried = carriedWeapons[i];
-                        break;
+                        memory.ForgetSidearmMemory(stale);
                     }
+                    rec.claimed.Remove(stale);
                 }
-
-                if (rememberedOfDef.Count == 0)
-                {
-                    memory.RememberedWeapons.Add(carried != null
-                        ? carried.toThingDefStuffDefPair()
-                        : new ThingDefStuffDefPair(def, def.MadeFromStuff ? GenStuff.DefaultStuffFor(def) : null));
-                }
-                else if (carried != null)
-                {
-                    // The loadout asked for a knife and the pawn fetched a plasteel one.
-                    // Retarget through SS's own forget: it is what clears a role still pointing
-                    // at the old pair, and SS's hasWeaponType is pair-exact, so a role left
-                    // naming the wrong material never matches again.
-                    ThingDefStuffDefPair actual = carried.toThingDefStuffDefPair();
-                    if (!rememberedOfDef.Contains(actual))
-                    {
-                        memory.ForgetSidearmMemory(rememberedOfDef[0]);
-                        memory.RememberedWeapons.Add(actual);
-                    }
-                }
-                rec.weapons.Add(def);
             }
         }
 
         /// <summary>
         /// First declared ranged weapon is the default ranged weapon; first declared melee is
-        /// the preferred melee weapon.
+        /// the preferred melee weapon — first that the pawn actually remembers, so a weapon
+        /// they have not got yet does not leave the role unset and SS picking by raw DPS.
         ///
-        /// One exception, and it is the player's: a role naming a weapon the loadout does not
-        /// declare was set by the player equipping it, and it stands while they are carrying
-        /// it. Put the weapon away and the loadout's first takes over — SS ignores an uncarried
-        /// role anyway, since its hasWeaponType guard is pair-exact, and would otherwise fall
-        /// back to picking by raw DPS.
-        ///
-        /// Forced weapons and the unarmed states are never touched. SS expresses "deliberately
-        /// unarmed" by raising a flag and nulling the pair, and its role setters clear a
-        /// same-category ForcedWeapon — and, for melee, PreferredUnarmed — as a side effect, so
-        /// writing a role without these guards destroys an explicit player setting.
+        /// Player intent outranks all of it: a forced weapon of that category, the unarmed
+        /// states, a role the player cleared by hand, and a role naming a weapon the loadout
+        /// does not list which the pawn is still carrying.
         /// </summary>
-        private static void AssertRoles(Pawn pawn, CompSidearmMemory memory, List<ThingDef> declared)
+        private static void AssertRoles(Pawn pawn, CompSidearmMemory memory, PawnTemplateRecord rec,
+                                        List<ThingDef> declared, ThingDefStuffDefPair? forced)
         {
-            if (memory.ForcedWeapon.HasValue || memory.ForcedUnarmed)
+            if (memory.ForcedUnarmed)
             {
                 return;
             }
+            // SS's setters only clear a forced weapon of their OWN category, so a forced melee
+            // weapon is no reason to abandon the ranged default.
+            bool forcedRanged = forced.HasValue && forced.Value.thing != null && forced.Value.thing.IsRangedWeapon;
+            bool forcedMelee = forced.HasValue && forced.Value.thing != null && forced.Value.thing.IsMeleeWeapon;
 
-            ThingDef firstRanged = declared.FirstOrDefault(d => d.IsRangedWeapon);
-            if (firstRanged != null && !PlayersAndInHand(pawn, memory.DefaultRangedWeapon, declared))
+            if (!forcedRanged && !rec.rangedRoleVetoed
+                && !PlayersAndInHand(pawn, memory.DefaultRangedWeapon, declared))
             {
-                ThingDefStuffDefPair pair = memory.RememberedWeapons.FirstOrDefault(p => p.thing == firstRanged);
-                if (pair.thing != null && memory.DefaultRangedWeapon != pair)
+                ThingDefStuffDefPair? pick = FirstRemembered(memory, declared, rec, d => d.IsRangedWeapon);
+                if (pick.HasValue && memory.DefaultRangedWeapon != pick)
                 {
-                    memory.SetRangedWeaponTypeAsDefault(pair);
+                    memory.SetRangedWeaponTypeAsDefault(pick.Value);
                 }
             }
 
-            if (memory.PreferredUnarmed)
+            if (memory.PreferredUnarmed || forcedMelee || rec.meleeRoleVetoed)
             {
                 return;
             }
-
-            ThingDef firstMelee = declared.FirstOrDefault(d => d.IsMeleeWeapon);
-            if (firstMelee != null && !PlayersAndInHand(pawn, memory.PreferredMeleeWeapon, declared))
+            if (!PlayersAndInHand(pawn, memory.PreferredMeleeWeapon, declared))
             {
-                ThingDefStuffDefPair pair = memory.RememberedWeapons.FirstOrDefault(p => p.thing == firstMelee);
-                if (pair.thing != null && memory.PreferredMeleeWeapon != pair)
+                ThingDefStuffDefPair? pick = FirstRemembered(memory, declared, rec, d => d.IsMeleeWeapon);
+                if (pick.HasValue && memory.PreferredMeleeWeapon != pick)
                 {
-                    memory.SetMeleeWeaponTypeAsPreferred(pair);
+                    memory.SetMeleeWeaponTypeAsPreferred(pick.Value);
                 }
             }
+        }
+
+        /// <summary>
+        /// First declared def of this category that is remembered and not vetoed, preferring a
+        /// pair this projection claimed so the role never names a material the pawn dropped.
+        /// </summary>
+        private static ThingDefStuffDefPair? FirstRemembered(CompSidearmMemory memory, List<ThingDef> declared,
+                                                             PawnTemplateRecord rec, Func<ThingDef, bool> category)
+        {
+            foreach (ThingDef def in declared.Where(d => category(d) && !rec.forgotten.Contains(d)))
+            {
+                ThingDefStuffDefPair mine = rec.claimed.FirstOrDefault(
+                    p => p.thing == def && memory.RememberedWeapons.Contains(p));
+                if (mine.thing != null)
+                {
+                    return mine;
+                }
+                ThingDefStuffDefPair any = memory.RememberedWeapons.FirstOrDefault(p => p.thing == def);
+                if (any.thing != null)
+                {
+                    return any;
+                }
+            }
+            return null;
         }
 
         /// <summary>The player equipped something the loadout does not list, and still has it.</summary>
         private static bool PlayersAndInHand(Pawn pawn, ThingDefStuffDefPair? role, List<ThingDef> declared)
         {
-            return role.HasValue && !declared.Contains(role.Value.thing) && pawn.hasWeaponType(role.Value);
+            return role.HasValue && role.Value.thing != null
+                   && !declared.Contains(role.Value.thing) && pawn.hasWeaponType(role.Value);
         }
     }
 }

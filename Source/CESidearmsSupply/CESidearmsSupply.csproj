@@ -30,8 +30,6 @@
             <HintPath>$(RimWorldWorkshopDir)/927155256/v1.6/Assemblies/SimpleSidearms.dll</HintPath>
             <Private>false</Private>
         </Reference>
-        <Publicize Include="CombatExtended" />
-        <Publicize Include="SimpleSidearms" />
     </ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 using HarmonyLib;
+using RimWorld;
 using UnityEngine;
 using Verse;
 
@@ -33,12 +34,47 @@ namespace CESidearmsSupply
         {
             var listing = new Listing_Standard();
             listing.Begin(inRect);
+
+            bool was = Settings.loadoutWeaponsAsSidearms;
             listing.CheckboxLabeled("Loadout weapons as sidearms", ref Settings.loadoutWeaponsAsSidearms,
-                "Weapons listed in a CE loadout are auto-remembered as sidearms by assigned pawns. First weapon in the list becomes the main.");
+                "Weapons listed in a CE loadout are auto-remembered as sidearms by assigned pawns. "
+                + "The first ranged weapon in the list becomes the default ranged weapon and the first "
+                + "melee the preferred melee weapon. Removing a weapon from the loadout makes the pawn "
+                + "forget it as a sidearm, which is what lets CE clear it out of the inventory.");
+
+            // Turning it off has to undo it, not freeze it. The compat patch exempts every
+            // remembered weapon from CE's drop, so memories left behind with nobody to release
+            // them would pin weapons in inventories with no way back short of the gizmo.
+            if (was && !Settings.loadoutWeaponsAsSidearms)
+            {
+                Release();
+            }
+
+            listing.Gap();
+            if (SupplyGameComponent.Instance != null
+                && listing.ButtonText("Release all claimed sidearms", "Forget every sidearm this mod "
+                                      + "added, on every pawn, and start over. Weapons you added by hand "
+                                      + "are not touched."))
+            {
+                Release();
+            }
+
             listing.Gap();
             listing.Label("Ammo for sidearms is Combat Extended's own job: add the ammo to the loadout and "
                           + "CE keeps the pawn stocked to that count, the same as for any other item.");
             listing.End();
+        }
+
+        private static void Release()
+        {
+            SupplyGameComponent comp = SupplyGameComponent.Instance;
+            if (comp == null)
+            {
+                return; // no game loaded; nothing was ever claimed
+            }
+            int released = comp.ReleaseAll();
+            Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s).",
+                             MessageTypeDefOf.TaskCompletion, historical: false);
         }
     }
 

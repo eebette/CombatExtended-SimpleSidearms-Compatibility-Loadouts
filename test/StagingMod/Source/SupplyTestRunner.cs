@@ -51,6 +51,11 @@ namespace CESupplyTestStaging
             public string name;
             public Func<(bool pass, string detail)> eval;
             public bool informational; // recorded, never fails the run
+            // Must-not-happen. Re-evaluated on every poll instead of latching on first pass,
+            // and a failure fails the phase immediately rather than waiting for the deadline.
+            // Without this a negative check passes at tick 0 — before the thing it forbids
+            // could have happened — and is never looked at again.
+            public bool negative;
             public bool passed;
             public string lastDetail = "not evaluated";
         }
@@ -61,9 +66,9 @@ namespace CESupplyTestStaging
             public Action mutate;
             public List<Check> checks = new List<Check>();
             public int deadlineTicks;
-            // Unused since SUPPLY-2 moved to the compat patch. Keep it: the fix for the
-            // latching-negative-check bug needs a window a must-not-happen check holds over.
-            public int minTicks; // phase cannot complete before this — observation window for informational checks
+            // Phase cannot complete before this. The observation window a negative check has
+            // to hold across, and the settle time for informational checks.
+            public int minTicks;
             public bool failed;
         }
 
@@ -123,11 +128,14 @@ namespace CESupplyTestStaging
 
             Phase phase = phases[phaseIndex];
             bool allPass = true;
+            Check tripped = null;
             foreach (Check check in phase.checks)
             {
                 // Informational checks re-evaluate until the phase ends (their last
-                // observation is what gets reported) and never gate advancement.
-                if (check.passed && !check.informational)
+                // observation is what gets reported) and never gate advancement. Negative
+                // checks re-evaluate because a must-not-happen that passes now can still
+                // fail later — latching them is what makes them vacuous.
+                if (check.passed && !check.informational && !check.negative)
                 {
                     continue;
                 }
@@ -139,6 +147,10 @@ namespace CESupplyTestStaging
                     if (!pass && !check.informational)
                     {
                         allPass = false;
+                        if (check.negative)
+                        {
+                            tripped = check;
+                        }
                     }
                 }
                 catch (Exception e)
@@ -151,6 +163,14 @@ namespace CESupplyTestStaging
                 }
             }
 
+            if (tripped != null)
+            {
+                phase.failed = true;
+                Log.Warning($"[SupplyTest] Phase '{phase.label}' FAILED: '{tripped.name}' must not happen "
+                            + $"but did at tick {tick} — {tripped.lastDetail}");
+                AdvancePhase();
+                return;
+            }
             if (tick - phaseStartTick < phase.minTicks)
             {
                 return;
@@ -307,10 +327,11 @@ namespace CESupplyTestStaging
 
         private static void ForceReconcile(Pawn pawn)
         {
-            // Any invocation of TryGiveJob runs the Loadouts module's reconcile prefix;
-            // the returned job (if any) is discarded — physical work stays with the
-            // pawn's natural think tree.
-            new JobGiver_UpdateLoadout().TryGiveJob(pawn);
+            // The reconcile itself, nothing else. Going through CE's TryGiveJob would also
+            // run CE's own loadout enforcement — which physically drops equipment and
+            // inventory and rewrites CE's throttle — so a phase calling this twice was doing
+            // two rounds of CE enforcement rather than two reconciles.
+            CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Prefix(pawn);
         }
 
         private static List<LoadoutSlot> Stream(Pawn pawn)
@@ -327,6 +348,53 @@ namespace CESupplyTestStaging
         private static Check C(string name, Func<(bool, string)> eval, bool informational = false)
         {
             return new Check { name = name, eval = eval, informational = informational };
+        }
+
+        /// <summary>A must-not-happen check. Held across the whole phase, not just sampled once.</summary>
+        private static Check N(string name, Func<(bool, string)> eval)
+        {
+            return new Check { name = name, eval = eval, negative = true };
+        }
+
+        /// <summary>
+        /// Drive a gizmo interaction the way the game does: the module's observer brackets
+        /// Gizmo_SidearmsList.handleInteraction, so run its prefix, make the change SS's own
+        /// branch would make, then run its postfix. Only SS's UI branch dispatch is skipped —
+        /// the intent capture under test is the real code.
+        /// </summary>
+        private static void ThroughGizmo(Pawn pawn, Action change)
+        {
+            CompSidearmMemory memory = Mem(pawn);
+            var gizmo = new Gizmo_SidearmsList(pawn,
+                pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true).ToList(),
+                memory.RememberedWeapons.ToList(), memory);
+            CESidearmsSupply.Patches.Gizmo_SidearmsList_handleInteraction_Patch.Snapshot state = null;
+            CESidearmsSupply.Patches.Gizmo_SidearmsList_handleInteraction_Patch.Prefix(gizmo, ref state);
+            change();
+            CESidearmsSupply.Patches.Gizmo_SidearmsList_handleInteraction_Patch.Postfix(gizmo, state);
+        }
+
+        private static void GizmoForget(Pawn pawn, ThingDef def)
+        {
+            ThroughGizmo(pawn, () =>
+            {
+                foreach (var pair in Mem(pawn).RememberedWeapons.Where(p => p.thing == def).ToList())
+                {
+                    Mem(pawn).ForgetSidearmMemory(pair);
+                }
+            });
+            ForceReconcile(pawn);
+            ForceReconcile(pawn); // a second pass is where the old code re-claimed it
+        }
+
+        private static void GizmoRemember(Pawn pawn, ThingWithComps weapon)
+        {
+            ThroughGizmo(pawn, () => Mem(pawn).InformOfAddedSidearm(weapon));
+        }
+
+        private static void GizmoClearRangedRole(Pawn pawn)
+        {
+            ThroughGizmo(pawn, () => Mem(pawn).UnsetRangedWeaponDefault());
         }
 
         // -- SUPPLY-1: loadout weapons as sidearms + ammo sustainment --
@@ -630,7 +698,7 @@ namespace CESupplyTestStaging
                         // inventory, not to their hands, so restoring it as the role would be
                         // inferring intent from an automatic action. Equip it again to lead.
                         var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        bool claimed = rec != null && rec.weapons.Contains(playerPick.def);
+                        bool claimed = rec != null && rec.claimed.Any(p => p.thing == playerPick.def);
                         return (!claimed, $"undeclared pick claimed={claimed}");
                     }),
                 }
@@ -638,19 +706,16 @@ namespace CESupplyTestStaging
 
             // "Carry it, but do not wield it": forgetting a DECLARED weapon in SS's gizmo is
             // the only way to say that, and the projection used to re-claim it every pass.
+            //
+            // Driven through the gizmo observer, not by calling ForgetSidearmMemory on its
+            // own. That distinction is the whole fix: SS's equip interception calls the very
+            // same method on every weapon swap, so a test that fakes the player that way
+            // proves nothing about whether the player was understood.
             phases.Add(new Phase
             {
                 label = "gizmo-forget-of-declared-weapon-sticks",
                 deadlineTicks = 6000,
-                mutate = () =>
-                {
-                    foreach (var pair in Mem(dockie).RememberedWeapons.Where(p => p.thing == pistol).ToList())
-                    {
-                        Mem(dockie).ForgetSidearmMemory(pair);
-                    }
-                    ForceReconcile(dockie);
-                    ForceReconcile(dockie); // a second pass is where the old code re-claimed it
-                },
+                mutate = () => GizmoForget(dockie, pistol),
                 checks =
                 {
                     C("stays-forgotten", () =>
@@ -658,11 +723,11 @@ namespace CESupplyTestStaging
                         bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
                         return (!remembered, $"pistol remembered={remembered} (player took it out of the list)");
                     }),
-                    C("recorded-as-suppressed", () =>
+                    C("recorded-as-player-intent", () =>
                     {
                         var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        bool sup = rec != null && rec.suppressed.Contains(pistol);
-                        return (sup, $"suppressed={sup}");
+                        bool forgotten = rec != null && rec.forgotten.Contains(pistol);
+                        return (forgotten, $"recorded as forgotten={forgotten}");
                     }),
                     C("still-declared-so-ce-keeps-hauling-it", () =>
                     {
@@ -687,7 +752,7 @@ namespace CESupplyTestStaging
                         carriedPistol = (ThingWithComps)ThingMaker.MakeThing(pistol);
                         dockie.inventory.innerContainer.TryAdd(carriedPistol, true);
                     }
-                    Mem(dockie).InformOfAddedSidearm(carriedPistol);
+                    GizmoRemember(dockie, carriedPistol);
                     ForceReconcile(dockie);
                 },
                 checks =
@@ -695,16 +760,175 @@ namespace CESupplyTestStaging
                     C("suppression-cleared", () =>
                     {
                         var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        bool sup = rec != null && rec.suppressed.Contains(pistol);
-                        bool claimed = rec != null && rec.weapons.Contains(pistol);
-                        return (!sup && claimed, $"suppressed={sup} claimed={claimed}");
+                        bool forgotten = rec != null && rec.forgotten.Contains(pistol);
+                        bool claimed = rec != null && rec.claimed.Any(p => p.thing == pistol);
+                        return (!forgotten && claimed, $"forgotten={forgotten} claimed={claimed}");
+                    }),
+                }
+            });
+
+
+            // #5. The defect that made the old design unshippable: Simple Sidearms forgets the
+            // outgoing primary on EVERY equip (JustBeforeEquip, on vanilla JobDriver_Equip),
+            // and CE catches the displaced weapon into the inventory rather than dropping it.
+            // Inferring "the player forgot this" from the resulting gap suppressed a declared
+            // weapon permanently, on an ordinary right-click, with no way back.
+            phases.Add(new Phase
+            {
+                label = "equipping-something-else-does-not-suppress-a-declared-weapon",
+                deadlineTicks = 6000,
+                minTicks = 300,
+                mutate = () =>
+                {
+                    ThingWithComps outgoing = dockie.equipment?.Primary;
+                    var other = (ThingWithComps)ThingMaker.MakeThing(revolver);
+                    GenPlace.TryPlaceThing(other, dockie.Position, dockie.Map, ThingPlaceMode.Near);
+                    // What SS's transpiler runs just before the equip toil completes.
+                    PeteTimesSix.SimpleSidearms.Intercepts.JobDriver_Equip_MakeNewToils_Patches
+                        .JustBeforeEquip(dockie, other);
+                    if (outgoing != null && dockie.equipment.Primary == outgoing)
+                    {
+                        dockie.equipment.Remove(outgoing);
+                        dockie.inventory.innerContainer.TryAdd(outgoing, true);
+                    }
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    N("sniper-never-recorded-as-player-forgotten", () =>
+                    {
+                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
+                        bool forgotten = rec != null && rec.forgotten.Contains(sniper);
+                        return (!forgotten, $"sniper in forgotten={forgotten}");
+                    }),
+                    C("sniper-reclaimed", () =>
+                    {
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == sniper);
+                        return (remembered, $"sniper remembered again={remembered}");
+                    }),
+                }
+            });
+
+            // #7. SS clears ForcedWeapon as a side effect of forgetting its last copy, so the
+            // guard has to hold across the forget phase, not just in role assertion.
+            phases.Add(new Phase
+            {
+                label = "forced-weapon-survives-its-row-leaving-the-loadout",
+                deadlineTicks = 6000,
+                minTicks = 300,
+                mutate = () =>
+                {
+                    var pair = Mem(dockie).RememberedWeapons.FirstOrDefault(p => p.thing == gladius);
+                    if (pair.thing != null)
+                    {
+                        Mem(dockie).SetWeaponAsForced(pair, drafted: false);
+                    }
+                    LoadoutSlot slot = SlotOf(gladius);
+                    if (slot != null)
+                    {
+                        loadout.RemoveSlot(slot);
+                    }
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    N("force-never-cleared", () =>
+                    {
+                        var forced = Mem(dockie).ForcedWeapon;
+                        return (forced.HasValue && forced.Value.thing == gladius,
+                                $"forced={forced?.thing?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            // #12. Guessing a material for a weapon the pawn has not got sends SS chasing a
+            // stuff the loadout never named — it matches pairs exactly, CE matches defs.
+            phases.Add(new Phase
+            {
+                label = "declared-but-uncarried-weapon-is-not-remembered-with-a-guessed-stuff",
+                deadlineTicks = 6000,
+                minTicks = 600,
+                mutate = () =>
+                {
+                    ThingDef knife = D("MeleeWeapon_Knife");
+                    foreach (var t in dockie.inventory.innerContainer.OfType<ThingWithComps>()
+                                          .Where(t => t.def == knife).ToList())
+                    {
+                        dockie.inventory.innerContainer.Remove(t);
+                    }
+                    loadout.AddSlot(new LoadoutSlot(knife, 1));
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    N("no-invented-knife-memory", () =>
+                    {
+                        ThingDef knife = D("MeleeWeapon_Knife");
+                        bool carried = CarriedWeaponDefs(dockie).Contains(knife);
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == knife);
+                        return (carried || !remembered,
+                                $"knife carried={carried} remembered={remembered}");
+                    }),
+                }
+            });
+
+            // #8. SS's gizmo cascade unsets a role on the first click and only forgets on the
+            // second, so restoring a cleared role made the first click look broken.
+            phases.Add(new Phase
+            {
+                label = "a-hand-cleared-ranged-role-is-not-restored",
+                deadlineTicks = 6000,
+                minTicks = 600,
+                mutate = () =>
+                {
+                    GizmoClearRangedRole(dockie);
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    N("ranged-default-stays-cleared", () =>
+                    {
+                        var def = Mem(dockie).DefaultRangedWeapon;
+                        return (!def.HasValue, $"default={def?.thing?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            // #4. CE reassigns every pawn of a deleted loadout to the default one by writing
+            // its dictionary directly, and deleting a loadout is an unconfirmed float-menu
+            // click. Reading that as "declares nothing" wiped every claimed sidearm at once.
+            // Last, because it takes the loadout away.
+            phases.Add(new Phase
+            {
+                label = "deleting-the-loadout-does-not-wipe-remembered-sidearms",
+                deadlineTicks = 6000,
+                minTicks = 600,
+                mutate = () =>
+                {
+                    LoadoutManager.RemoveLoadout(loadout);
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("precondition-pawn-is-on-the-default-loadout", () =>
+                    {
+                        Loadout now = dockie.GetLoadout();
+                        return (now == null || now.defaultLoadout, $"loadout={now?.label ?? "null"}");
+                    }),
+                    N("memories-survive", () =>
+                    {
+                        int count = Mem(dockie).RememberedWeapons.Count;
+                        return (count > 0, $"remembered={count}");
                     }),
                 }
             });
 
             return phases;
         }
-
-
-            }
+    }
 }

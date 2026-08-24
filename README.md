@@ -51,6 +51,17 @@ Two things outrank the loadout, both because they are explicit:
 - **A weapon you equip that the loadout doesn't list** keeps the role for as long as the pawn
   is carrying it. Put it away and the loadout's first takes over — SS ignores a role pointing
   at a weapon the pawn hasn't got, and would otherwise fall back to picking by raw DPS.
+- **A role you clear by hand stays cleared.** SS has a "prefer unarmed" flag but no ranged
+  equivalent, so without this the projection would put a cleared default ranged weapon back
+  within the minute. Set a role again and the loadout resumes managing it.
+
+Player intent is read from the gizmo as it happens, never inferred afterwards from a missing
+memory: SS drops memories on its own — every equip forgets the outgoing primary — so absence
+means nothing on its own.
+
+A declared weapon is remembered once the pawn actually **has** one, not when the row is added.
+The row already makes CE fetch it, and guessing a material before it arrives would send SS
+hunting a specific stuff the loadout never asked for.
 
 **Forget a declared weapon in SS's gizmo and it stays forgotten** — that is how you say *carry
 this but don't wield it*, which removing the loadout row cannot express (that would stop the
