@@ -113,6 +113,12 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 ## Regression
 
 - Pawn with default loadout: zero behavior change, no records created.
-- Save/load mid-state: template records persist; removing this mod mid-save leaves only
-  remembered sidearms (inert SS data) behind.
+- Save/load mid-state: template records persist.
+- Uninstalling mid-save is not silent. The orphaned GameComponent node produces two red
+  errors at load — "could not find class ... trying to use Verse.GameComponent" and the
+  SaveableFromNode exception behind it — each dumping the component's serialized XML, which
+  on a mature colony is several kilobytes. RimWorld then drops the null and moves on, so it
+  is a one-time cost, but it is not nothing. The save-time prune is what bounds its size.
+  Sidearm memories the mod wrote are left behind as inert SS data; "Release all claimed
+  sidearms" in the settings clears them first if the player uses it before uninstalling.
 - Dev log: no red errors from [Sidearms&Supply]; look for the reconcile WarningOnce.
