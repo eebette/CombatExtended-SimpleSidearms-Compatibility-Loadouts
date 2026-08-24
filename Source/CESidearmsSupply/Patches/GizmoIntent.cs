@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using HarmonyLib;
 using SimpleSidearms.rimworld;
 using Verse;
@@ -8,141 +6,223 @@ using Verse;
 namespace CESidearmsSupply.Patches
 {
     /// <summary>
-    /// Records what the player meant, so the reconcile never has to guess it.
+    /// Player intent, read at the points Simple Sidearms lets a player express it.
     ///
-    /// The projection needs two facts Simple Sidearms does not store: "I took this weapon out
-    /// of the list on purpose" and "I cleared this role on purpose". Neither can be recovered
-    /// afterwards — SS's forget button calls the same ForgetSidearmMemory that its equip
-    /// interception calls on every weapon swap, with nothing to tell them apart. Inferring
-    /// intent from a missing memory therefore reads an ordinary equip as a deliberate forget.
+    /// The projection needs two facts SS does not store: "I took this weapon out of the list
+    /// on purpose" and "I cleared this role on purpose". Neither can be recovered afterwards
+    /// from the state alone — SS drops memories by itself, forgetting the outgoing primary on
+    /// every equip — so a missing memory says nothing about what the player wanted.
     ///
-    /// So observe the gizmo instead: snapshot before the click, diff after. Anything that
-    /// disappeared across that call disappeared because the player clicked. This does not
-    /// depend on SS's interaction cascade or on which branch ran, only on the outcome, which
-    /// is the part of it least likely to change.
+    /// Both are reachable directly, without guessing:
+    ///
+    ///   UnsetRangedWeaponDefault and UnsetMeleeWeaponPreference have no callers anywhere in
+    ///   SS outside Gizmo_SidearmsList. Reaching them at all means the player clicked.
+    ///
+    ///   ForgetSidearmMemory has exactly two callers: the gizmo's forget button, and
+    ///   InformOfDroppedSidearm — the one that fires on equips and drops. So a forget that
+    ///   did not come from a drop came from the player.
+    ///
+    /// The module's own writes are bracketed by Ours() so the projection never reads its own
+    /// bookkeeping as a decision.
+    ///
+    /// Caveat worth knowing: these are public methods, so another mod calling ForgetSidearmMemory
+    /// outside a drop would be read as a player forget. That is a far narrower exposure than
+    /// inferring intent from state, where SS's own equip path tripped it several times a day.
     /// </summary>
-    [HarmonyPatch(typeof(Gizmo_SidearmsList), nameof(Gizmo_SidearmsList.handleInteraction))]
-    public static class Gizmo_SidearmsList_handleInteraction_Patch
+    public static class PlayerIntent
     {
-        public class Snapshot
-        {
-            public Pawn pawn;
-            public List<ThingDefStuffDefPair> remembered;
-            public ThingDefStuffDefPair? ranged;
-            public ThingDefStuffDefPair? melee;
-        }
+        [ThreadStatic] private static int dropDepth;
+        [ThreadStatic] private static int oursDepth;
 
-        public static bool Prepare()
+        internal static bool Ignoring => dropDepth > 0 || oursDepth > 0;
+
+        /// <summary>Bracket the module's own memory writes so they are not read as intent.</summary>
+        public static Scope Ours() => new Scope(ours: true);
+
+        internal static void EnterDrop() => dropDepth++;
+        internal static void ExitDrop() => dropDepth--;
+
+        public struct Scope : IDisposable
         {
-            if (AccessTools.Method(typeof(Gizmo_SidearmsList), "handleInteraction") != null)
+            private readonly bool ours;
+
+            internal Scope(bool ours)
             {
-                return true;
+                this.ours = ours;
+                if (ours)
+                {
+                    oursDepth++;
+                }
+                else
+                {
+                    dropDepth++;
+                }
             }
-            Log.Error("[Sidearms&Supply] Gizmo_SidearmsList.handleInteraction not found — the "
-                      + "sidearm gizmo will not be observed, so forgetting a loadout weapon by hand "
-                      + "will not stick. Simple Sidearms probably moved it.");
-            return false;
+
+            public void Dispose()
+            {
+                if (ours)
+                {
+                    oursDepth--;
+                }
+                else
+                {
+                    dropDepth--;
+                }
+            }
         }
 
+        internal static PawnTemplateRecord RecordFor(CompSidearmMemory memory, bool create)
+        {
+            Pawn pawn = memory?.Owner;
+            SupplyGameComponent comp = SupplyGameComponent.Instance;
+            if (pawn == null || !pawn.IsColonist || comp == null)
+            {
+                return null;
+            }
+            return comp.GetRecord(pawn, create);
+        }
+    }
+
+    /// <summary>A forget that came from a drop or an equip is not a decision about the weapon.</summary>
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.InformOfDroppedSidearm))]
+    public static class CompSidearmMemory_InformOfDroppedSidearm_Patch
+    {
         [HarmonyPrefix]
-        public static void Prefix(Gizmo_SidearmsList __instance, ref Snapshot __state)
+        public static void Prefix(ref bool __state)
         {
-            __state = null;
-            try
-            {
-                Pawn pawn = __instance?.parent;
-                if (pawn == null || !pawn.IsColonist)
-                {
-                    return;
-                }
-                CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
-                if (memory?.RememberedWeapons == null)
-                {
-                    return;
-                }
-                __state = new Snapshot
-                {
-                    pawn = pawn,
-                    remembered = new List<ThingDefStuffDefPair>(memory.RememberedWeapons),
-                    ranged = memory.DefaultRangedWeapon,
-                    melee = memory.PreferredMeleeWeapon,
-                };
-            }
-            catch (Exception e)
-            {
-                Log.ErrorOnce("[Sidearms&Supply] Gizmo snapshot failed: " + e, 0x53535233);
-            }
+            __state = true;
+            PlayerIntent.EnterDrop();
         }
 
         [HarmonyPostfix]
-        public static void Postfix(Gizmo_SidearmsList __instance, Snapshot __state)
+        public static void Postfix(bool __state)
         {
-            if (__state == null)
+            if (__state)
+            {
+                PlayerIntent.ExitDrop();
+            }
+        }
+    }
+
+    /// <summary>Everything else that reaches ForgetSidearmMemory is the gizmo's forget button.</summary>
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.ForgetSidearmMemory))]
+    public static class CompSidearmMemory_ForgetSidearmMemory_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance, ThingDefStuffDefPair weaponMemory)
+        {
+            if (PlayerIntent.Ignoring || weaponMemory.thing == null)
             {
                 return;
             }
             try
             {
-                Diff(__state);
+                PawnTemplateRecord rec = PlayerIntent.RecordFor(__instance, create: true);
+                if (rec == null)
+                {
+                    return;
+                }
+                rec.forgotten.Add(weaponMemory.thing);
+                rec.claimed.RemoveAll(p => p.thing == weaponMemory.thing);
             }
             catch (Exception e)
             {
-                Log.ErrorOnce("[Sidearms&Supply] Gizmo intent capture failed: " + e, 0x53535234);
+                Log.ErrorOnce("[Sidearms&Supply] Could not record a sidearm forget: " + e, 0x53535233);
             }
         }
+    }
 
-        private static void Diff(Snapshot before)
+    /// <summary>Putting it back in the list by hand withdraws the forget.</summary>
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.InformOfAddedSidearm))]
+    public static class CompSidearmMemory_InformOfAddedSidearm_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance, Thing weapon)
         {
-            CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(before.pawn);
-            SupplyGameComponent comp = SupplyGameComponent.Instance;
-            if (memory?.RememberedWeapons == null || comp == null)
+            if (PlayerIntent.Ignoring || weapon?.def == null)
             {
                 return;
             }
-            List<ThingDefStuffDefPair> after = memory.RememberedWeapons;
-            PawnTemplateRecord rec = null;
-
-            // A def with no copies left is one the player just removed from the list.
-            foreach (ThingDef gone in before.remembered.Select(p => p.thing).Distinct()
-                                            .Where(d => d != null && !after.Any(p => p.thing == d)))
-            {
-                rec ??= comp.GetRecord(before.pawn, create: true);
-                rec.forgotten.Add(gone);
-                rec.claimed.RemoveAll(p => p.thing == gone);
-            }
-
-            // Adding it back by hand is how the player takes that back.
-            foreach (ThingDef added in after.Select(p => p.thing).Distinct()
-                                            .Where(d => d != null && !before.remembered.Any(p => p.thing == d)))
-            {
-                rec ??= comp.GetRecord(before.pawn, create: true);
-                rec.forgotten.Remove(added);
-            }
-
-            // Clearing a role is a veto; setting one by hand withdraws the veto. Simple
-            // Sidearms has a flag for "deliberately no melee preference" but none for ranged,
-            // so without this the projection would restore a cleared ranged default forever.
-            rec = ApplyRoleVeto(before.ranged, memory.DefaultRangedWeapon, rec, before.pawn, comp,
-                                (r, v) => r.rangedRoleVetoed = v);
-            ApplyRoleVeto(before.melee, memory.PreferredMeleeWeapon, rec, before.pawn, comp,
-                          (r, v) => r.meleeRoleVetoed = v);
+            PlayerIntent.RecordFor(__instance, create: false)?.forgotten.Remove(weapon.def);
         }
+    }
 
-        private static PawnTemplateRecord ApplyRoleVeto(ThingDefStuffDefPair? before, ThingDefStuffDefPair? after,
-                                                        PawnTemplateRecord rec, Pawn pawn, SupplyGameComponent comp,
-                                                        Action<PawnTemplateRecord, bool> set)
+    /// <summary>
+    /// Clearing a role is a veto. SS has a persisted flag for "deliberately no melee
+    /// preference" but none for ranged, so without recording it the projection would put a
+    /// cleared default ranged weapon back within the minute and the click would look broken.
+    /// </summary>
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetRangedWeaponDefault))]
+    public static class CompSidearmMemory_UnsetRangedWeaponDefault_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance)
         {
-            if (before.HasValue && !after.HasValue)
+            if (PlayerIntent.Ignoring)
             {
-                rec ??= comp.GetRecord(pawn, create: true);
-                set(rec, true);
+                return;
             }
-            else if (after.HasValue && after != before)
+            PawnTemplateRecord rec = PlayerIntent.RecordFor(__instance, create: true);
+            if (rec != null)
             {
-                rec ??= comp.GetRecord(pawn, create: true);
-                set(rec, false);
+                rec.rangedRoleVetoed = true;
             }
-            return rec;
+        }
+    }
+
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetMeleeWeaponPreference))]
+    public static class CompSidearmMemory_UnsetMeleeWeaponPreference_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance)
+        {
+            if (PlayerIntent.Ignoring)
+            {
+                return;
+            }
+            PawnTemplateRecord rec = PlayerIntent.RecordFor(__instance, create: true);
+            if (rec != null)
+            {
+                rec.meleeRoleVetoed = true;
+            }
+        }
+    }
+
+    /// <summary>Setting a role by hand withdraws the veto on that category.</summary>
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetRangedWeaponTypeAsDefault))]
+    public static class CompSidearmMemory_SetRangedWeaponTypeAsDefault_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance)
+        {
+            if (PlayerIntent.Ignoring)
+            {
+                return;
+            }
+            PawnTemplateRecord rec = PlayerIntent.RecordFor(__instance, create: false);
+            if (rec != null)
+            {
+                rec.rangedRoleVetoed = false;
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetMeleeWeaponTypeAsPreferred))]
+    public static class CompSidearmMemory_SetMeleeWeaponTypeAsPreferred_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance)
+        {
+            if (PlayerIntent.Ignoring)
+            {
+                return;
+            }
+            PawnTemplateRecord rec = PlayerIntent.RecordFor(__instance, create: false);
+            if (rec != null)
+            {
+                rec.meleeRoleVetoed = false;
+            }
         }
     }
 }

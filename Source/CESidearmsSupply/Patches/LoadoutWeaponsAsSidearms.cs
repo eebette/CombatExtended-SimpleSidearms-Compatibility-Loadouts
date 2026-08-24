@@ -124,9 +124,14 @@ namespace CESidearmsSupply.Patches
             ThingDefStuffDefPair? forced = memory.ForcedWeapon;
             ThingDefStuffDefPair? forcedDrafted = memory.ForcedWeaponWhileDrafted;
 
-            Step(pawn, () => ForgetUndeclared(memory, rec, declared, forced, forcedDrafted), "forget");
-            Step(pawn, () => ClaimDeclared(pawn, memory, rec, declared), "claim");
-            Step(pawn, () => AssertRoles(pawn, memory, rec, declared, forced), "roles");
+            // Everything below writes to SS memory. Bracket it so the intent hooks do not
+            // read the projection's own bookkeeping as a decision the player made.
+            using (PlayerIntent.Ours())
+            {
+                Step(pawn, () => ForgetUndeclared(memory, rec, declared, forced, forcedDrafted), "forget");
+                Step(pawn, () => ClaimDeclared(pawn, memory, rec, declared), "claim");
+                Step(pawn, () => AssertRoles(pawn, memory, rec, declared, forced), "roles");
+            }
         }
 
         /// <summary>

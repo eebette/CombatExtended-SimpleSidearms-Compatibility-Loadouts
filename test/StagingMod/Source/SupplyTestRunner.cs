@@ -356,45 +356,27 @@ namespace CESupplyTestStaging
             return new Check { name = name, eval = eval, negative = true };
         }
 
-        /// <summary>
-        /// Drive a gizmo interaction the way the game does: the module's observer brackets
-        /// Gizmo_SidearmsList.handleInteraction, so run its prefix, make the change SS's own
-        /// branch would make, then run its postfix. Only SS's UI branch dispatch is skipped —
-        /// the intent capture under test is the real code.
-        /// </summary>
-        private static void ThroughGizmo(Pawn pawn, Action change)
-        {
-            CompSidearmMemory memory = Mem(pawn);
-            var gizmo = new Gizmo_SidearmsList(pawn,
-                pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true).ToList(),
-                memory.RememberedWeapons.ToList(), memory);
-            CESidearmsSupply.Patches.Gizmo_SidearmsList_handleInteraction_Patch.Snapshot state = null;
-            CESidearmsSupply.Patches.Gizmo_SidearmsList_handleInteraction_Patch.Prefix(gizmo, ref state);
-            change();
-            CESidearmsSupply.Patches.Gizmo_SidearmsList_handleInteraction_Patch.Postfix(gizmo, state);
-        }
-
+        // The player's levers, called exactly as Simple Sidearms' gizmo calls them. The
+        // module hooks these methods directly, so there is no simulation here — this is the
+        // real path, minus SS's UI branch dispatch.
         private static void GizmoForget(Pawn pawn, ThingDef def)
         {
-            ThroughGizmo(pawn, () =>
+            foreach (var pair in Mem(pawn).RememberedWeapons.Where(p => p.thing == def).ToList())
             {
-                foreach (var pair in Mem(pawn).RememberedWeapons.Where(p => p.thing == def).ToList())
-                {
-                    Mem(pawn).ForgetSidearmMemory(pair);
-                }
-            });
+                Mem(pawn).ForgetSidearmMemory(pair);
+            }
             ForceReconcile(pawn);
             ForceReconcile(pawn); // a second pass is where the old code re-claimed it
         }
 
         private static void GizmoRemember(Pawn pawn, ThingWithComps weapon)
         {
-            ThroughGizmo(pawn, () => Mem(pawn).InformOfAddedSidearm(weapon));
+            Mem(pawn).InformOfAddedSidearm(weapon);
         }
 
         private static void GizmoClearRangedRole(Pawn pawn)
         {
-            ThroughGizmo(pawn, () => Mem(pawn).UnsetRangedWeaponDefault());
+            Mem(pawn).UnsetRangedWeaponDefault();
         }
 
         // -- SUPPLY-1: loadout weapons as sidearms + ammo sustainment --

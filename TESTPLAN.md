@@ -99,11 +99,11 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 
 ## Known gaps
 
-- **The gizmo observer's own diff is only half covered.** Tests drive it by calling the
-  patch's prefix/postfix around the change SS's branch would make, so the intent capture is
-  real code under test, but SS's UI branch dispatch is not. Confirm by hand in game: click a
-  weapon in the sidearm gizmo twice (first click clears its role, second forgets it) and check
-  the pawn does not re-acquire it as a sidearm within the minute.
+- **SS's UI branch dispatch is not exercised.** The intent hooks sit on the memory methods
+  themselves, so the tests call exactly what the gizmo calls and the real hooks fire — but
+  which branch a given click reaches is SS's business and is untested. Confirm by hand: click
+  a weapon in the sidearm gizmo twice (first click clears its role, second forgets it) and
+  check the pawn does not re-acquire it as a sidearm within the minute.
 - **No save/load round trip.** `SupplyGameComponent.ExposeData` is untested; claimed pairs,
   forgotten defs and both role vetoes should survive a reload, and the prune should drop
   records for the dead, the departed and the empty.

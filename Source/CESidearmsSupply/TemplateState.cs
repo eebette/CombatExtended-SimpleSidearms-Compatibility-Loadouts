@@ -100,12 +100,15 @@ namespace CESidearmsSupply
                     : null;
                 if (memory?.RememberedWeapons != null)
                 {
-                    foreach (ThingDefStuffDefPair pair in entry.Value.claimed)
+                    using (Patches.PlayerIntent.Ours())
                     {
-                        if (memory.RememberedWeapons.Contains(pair))
+                        foreach (ThingDefStuffDefPair pair in entry.Value.claimed)
                         {
-                            memory.ForgetSidearmMemory(pair);
-                            released++;
+                            if (memory.RememberedWeapons.Contains(pair))
+                            {
+                                memory.ForgetSidearmMemory(pair);
+                                released++;
+                            }
                         }
                     }
                 }
