@@ -1,3 +1,4 @@
+using PeteTimesSix.SimpleSidearms.Utilities;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -331,7 +332,7 @@ namespace CESupplyTestStaging
             // run CE's own loadout enforcement — which physically drops equipment and
             // inventory and rewrites CE's throttle — so a phase calling this twice was doing
             // two rounds of CE enforcement rather than two reconciles.
-            CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Prefix(pawn);
+            CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(pawn);
         }
 
         private static List<LoadoutSlot> Stream(Pawn pawn)
@@ -356,27 +357,36 @@ namespace CESupplyTestStaging
             return new Check { name = name, eval = eval, negative = true };
         }
 
-        // The player's levers, called exactly as Simple Sidearms' gizmo calls them. The
-        // module hooks these methods directly, so there is no simulation here — this is the
-        // real path, minus SS's UI branch dispatch.
-        private static void GizmoForget(Pawn pawn, ThingDef def)
+        // The player's levers. The module's intent hooks only fire inside a gizmo
+        // interaction, so these enter that scope the way Gizmo_SidearmsList does and then
+        // make the call SS's own branch would make. The hooks under test are the real ones.
+        private static void InGizmo(Action act)
         {
-            foreach (var pair in Mem(pawn).RememberedWeapons.Where(p => p.thing == def).ToList())
+            CESidearmsSupply.Patches.PlayerIntent.Enter();
+            try { act(); } finally { CESidearmsSupply.Patches.PlayerIntent.Exit(); }
+        }
+
+        private static void PlayerForgets(Pawn pawn, ThingDef def)
+        {
+            InGizmo(() =>
             {
-                Mem(pawn).ForgetSidearmMemory(pair);
-            }
+                foreach (var pair in Mem(pawn).RememberedWeapons.Where(p => p.thing == def).ToList())
+                {
+                    Mem(pawn).ForgetSidearmMemory(pair);
+                }
+            });
             ForceReconcile(pawn);
             ForceReconcile(pawn); // a second pass is where the old code re-claimed it
         }
 
-        private static void GizmoRemember(Pawn pawn, ThingWithComps weapon)
+        private static void PlayerRemembers(Pawn pawn, ThingWithComps weapon)
         {
-            Mem(pawn).InformOfAddedSidearm(weapon);
+            InGizmo(() => Mem(pawn).InformOfAddedSidearm(weapon));
         }
 
-        private static void GizmoClearRangedRole(Pawn pawn)
+        private static void PlayerClearsRangedRole(Pawn pawn)
         {
-            Mem(pawn).UnsetRangedWeaponDefault();
+            InGizmo(() => Mem(pawn).UnsetRangedWeaponDefault());
         }
 
         // -- SUPPLY-1: loadout weapons as sidearms + ammo sustainment --
@@ -679,7 +689,7 @@ namespace CESupplyTestStaging
                         // EQUIPPING. Simple Sidearms' retrieval brings a weapon back to the
                         // inventory, not to their hands, so restoring it as the role would be
                         // inferring intent from an automatic action. Equip it again to lead.
-                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == playerPick.def);
                         return (!claimed, $"undeclared pick claimed={claimed}");
                     }),
@@ -697,7 +707,7 @@ namespace CESupplyTestStaging
             {
                 label = "gizmo-forget-of-declared-weapon-sticks",
                 deadlineTicks = 6000,
-                mutate = () => GizmoForget(dockie, pistol),
+                mutate = () => PlayerForgets(dockie, pistol),
                 checks =
                 {
                     C("stays-forgotten", () =>
@@ -707,9 +717,9 @@ namespace CESupplyTestStaging
                     }),
                     C("recorded-as-player-intent", () =>
                     {
-                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        bool forgotten = rec != null && rec.forgotten.Contains(pistol);
-                        return (forgotten, $"recorded as forgotten={forgotten}");
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Contains(pistol);
+                        return (excluded, $"recorded as do-not-equip={excluded}");
                     }),
                     C("still-declared-so-ce-keeps-hauling-it", () =>
                     {
@@ -734,17 +744,17 @@ namespace CESupplyTestStaging
                         carriedPistol = (ThingWithComps)ThingMaker.MakeThing(pistol);
                         dockie.inventory.innerContainer.TryAdd(carriedPistol, true);
                     }
-                    GizmoRemember(dockie, carriedPistol);
+                    PlayerRemembers(dockie, carriedPistol);
                     ForceReconcile(dockie);
                 },
                 checks =
                 {
                     C("suppression-cleared", () =>
                     {
-                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        bool forgotten = rec != null && rec.forgotten.Contains(pistol);
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Contains(pistol);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == pistol);
-                        return (!forgotten && claimed, $"forgotten={forgotten} claimed={claimed}");
+                        return (!excluded && claimed, $"dontEquip={excluded} claimed={claimed}");
                     }),
                 }
             });
@@ -780,9 +790,9 @@ namespace CESupplyTestStaging
                 {
                     N("sniper-never-recorded-as-player-forgotten", () =>
                     {
-                        var rec = CESidearmsSupply.SupplyGameComponent.Instance.GetRecord(dockie, create: false);
-                        bool forgotten = rec != null && rec.forgotten.Contains(sniper);
-                        return (!forgotten, $"sniper in forgotten={forgotten}");
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Contains(sniper);
+                        return (!excluded, $"sniper in dontEquip={excluded}");
                     }),
                     C("sniper-reclaimed", () =>
                     {
@@ -866,7 +876,7 @@ namespace CESupplyTestStaging
                 minTicks = 600,
                 mutate = () =>
                 {
-                    GizmoClearRangedRole(dockie);
+                    PlayerClearsRangedRole(dockie);
                     ForceReconcile(dockie);
                     ForceReconcile(dockie);
                 },
@@ -906,6 +916,59 @@ namespace CESupplyTestStaging
                     {
                         int count = Mem(dockie).RememberedWeapons.Count;
                         return (count > 0, $"remembered={count}");
+                    }),
+                }
+            });
+
+
+            // The regression for the defect that made the previous design inert: right-clicking
+            // a CARRIED weapon in the sidearms gizmo does not reach ForgetSidearmMemory
+            // directly — SS routes it through DropSidearm -> InformOfDroppedSidearm, the same
+            // call it uses for machine-driven drops. The old design classified by that call
+            // path and threw the player's decision away. This drives the real branch.
+            phases.Add(new Phase
+            {
+                label = "forgetting-a-carried-weapon-in-the-gizmo-sticks",
+                deadlineTicks = 12000,
+                minTicks = 900,
+                mutate = () =>
+                {
+                    ThingWithComps carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                                                   .FirstOrDefault(w => w.def == shotgun);
+                    if (carried == null)
+                    {
+                        carried = (ThingWithComps)ThingMaker.MakeThing(shotgun);
+                        dockie.inventory.innerContainer.TryAdd(carried, true);
+                        Mem(dockie).InformOfAddedSidearm(carried);
+                        ForceReconcile(dockie);
+                    }
+                    if (!loadout.Slots.Any(sl => sl.thingDef == shotgun))
+                    {
+                        loadout.AddSlot(new LoadoutSlot(shotgun, 1));
+                    }
+                    ForceReconcile(dockie);
+                    InGizmo(() => WeaponAssingment.DropSidearm(dockie, carried,
+                                                              intentionalDrop: true, unmemorise: true));
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("recorded-as-do-not-equip", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Contains(shotgun);
+                        return (excluded, $"shotgun in dontEquip={excluded}");
+                    }),
+                    N("never-re-remembered", () =>
+                    {
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
+                        return (!remembered, $"shotgun remembered again={remembered}");
+                    }),
+                    C("row-still-declared-so-ce-keeps-hauling-it", () =>
+                    {
+                        bool declared = loadout.Slots.Any(sl => sl.thingDef == shotgun);
+                        return (declared, $"shotgun row present={declared}");
                     }),
                 }
             });

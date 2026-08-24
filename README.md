@@ -55,9 +55,10 @@ Two things outrank the loadout, both because they are explicit:
   equivalent, so without this the projection would put a cleared default ranged weapon back
   within the minute. Set a role again and the loadout resumes managing it.
 
-Player intent is read from the gizmo as it happens, never inferred afterwards from a missing
-memory: SS drops memories on its own — every equip forgets the outgoing primary — so absence
-means nothing on its own.
+Player intent is read inside the sidearm gizmo's own interaction, never inferred afterwards
+from a missing memory: SS drops memories on its own — every equip forgets the outgoing
+primary — so absence means nothing by itself. Anything the gizmo does while the player is
+clicking is theirs; everything else is not.
 
 A declared weapon is remembered once the pawn actually **has** one, not when the row is added.
 The row already makes CE fetch it, and guessing a material before it arrives would send SS

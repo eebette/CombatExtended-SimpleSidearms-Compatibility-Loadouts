@@ -15,6 +15,15 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- The staging assembly drives PlayerIntent's scope directly: the alternative is
+             constructing SS's gizmo and writing its private selection field, which would test
+             more of SS than of this mod. -->
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>CESupplyTestStaging</_Parameter1>
+        </AssemblyAttribute>
+    </ItemGroup>
+
+    <ItemGroup>
         <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
         <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.*" />
         <PackageReference Include="Lib.Harmony" Version="2.3.3" ExcludeAssets="runtime" />

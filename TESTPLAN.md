@@ -19,7 +19,7 @@ phase that was never reached is not marked failed — so a run that stopped earl
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, in 16 phases: initial reconcile and physical fetch (memory contents,
+`supply1` covers, in 17 phases: initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -109,16 +109,18 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 
 ## Known gaps
 
-- **SS's UI branch dispatch is not exercised.** The intent hooks sit on the memory methods
-  themselves, so the tests call exactly what the gizmo calls and the real hooks fire — but
-  which branch a given click reaches is SS's business and is untested. Confirm by hand: click
-  a weapon in the sidearm gizmo twice (first click clears its role, second forgets it) and
-  check the pawn does not re-acquire it as a sidearm within the minute.
-- **No save/load round trip.** `SupplyGameComponent.ExposeData` is untested; claimed pairs,
-  forgotten defs and both role vetoes should survive a reload, and the prune should drop
-  records for the dead, the departed and the empty.
-- **No settings-toggle coverage.** Turning the feature off should release every claimed pair;
-  turning it back on should re-claim from scratch.
+- **SS's UI branch dispatch is not exercised.** The intent hooks fire inside a gizmo
+  interaction scope, and the tests enter that scope the way `handleInteraction` does before
+  making the call SS's own branch would make — so the hooks under test are real. Which branch
+  a given click reaches is SS's business and is untested. Confirm by hand: right-click a
+  carried sidearm in the gizmo and check the pawn does not re-acquire it within the minute.
+- **The eligibility predicate has no negative test.** Nothing stages a pawn SS would refuse
+  (slot limit reached, over the per-weapon mass cap, pacifist). Deleting `IsLegalSidearm`
+  would leave the suite green.
+- **No save/load round trip.** `CompLoadoutSidearms.PostExposeData` is untested; `claimed`,
+  `dontEquip` and both role vetoes should survive a reload.
+- **No settings-toggle coverage**, including the deferred release when the feature is
+  switched off with no save loaded.
 
 ## Regression
 
