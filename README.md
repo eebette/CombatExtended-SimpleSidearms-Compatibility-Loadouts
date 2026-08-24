@@ -66,13 +66,6 @@ Ad-hoc means *this pawn's primary is not in the loadout — keep it and feed it*
 it for declared sidearms both changed CE's drop behaviour for anyone who wanted sidearm ammo
 and forced ammo demand on anyone who wanted ad-hoc for its real purpose.
 
-**Capacity-aware retrieval** — Simple Sidearms already fetches remembered weapons a pawn
-isn't carrying (`JobGiver_RetrieveWeapon`, in the vanilla think tree, on by default), and it
-does so without consulting CE's weight and bulk model — neither its job giver nor its pickup
-toil checks capacity. This cancels a retrieval CE says the pawn has no room for, rather than
-letting them haul it back and have it count against everything else they carry. SS still
-decides which weapons are worth fetching; this only supplies the limit it can't see.
-
 ## Building
 
 Same pattern as the compat patch: `dotnet build Source/CESidearmsSupply/CESidearmsSupply.csproj -c Release`.

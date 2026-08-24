@@ -23,7 +23,7 @@ rm -f "$SAVEDATA/Saves"/SUPPLY-*.rws
 # timeout is the backstop if it wedges before that.
 timeout --signal=TERM 20m "${GS[@]}" "$RIMWORLD" -savedatafolder="$SAVEDATA" -quicktest -cesupplystage || true
 
-for save in SUPPLY-1-loadout-sidearms SUPPLY-2-refetch; do
+for save in SUPPLY-1-loadout-sidearms; do
     if [[ ! -f "$SAVEDATA/Saves/$save.rws" ]]; then
         echo "== STAGING FAILED: $save.rws was not written ==" >&2
         exit 1

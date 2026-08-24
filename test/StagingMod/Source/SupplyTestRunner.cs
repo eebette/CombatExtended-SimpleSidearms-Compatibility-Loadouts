@@ -15,7 +15,6 @@ namespace CESupplyTestStaging
     /// <summary>
     /// Headless-ish acceptance harness. Launch with:
     ///   -celoadsave=SUPPLY-1-loadout-sidearms -ceassert=supply1
-    ///   -celoadsave=SUPPLY-2-refetch          -ceassert=supply2
     /// Loads the save from the main menu, runs the scenario's phases (each phase =
     /// optional mutation + polled checks with a tick deadline), writes
     /// test-results-&lt;scenario&gt;.json into the save-data folder, then shuts the
@@ -62,6 +61,8 @@ namespace CESupplyTestStaging
             public Action mutate;
             public List<Check> checks = new List<Check>();
             public int deadlineTicks;
+            // Unused since SUPPLY-2 moved to the compat patch. Keep it: the fix for the
+            // latching-negative-check bug needs a window a must-not-happen check holds over.
             public int minTicks; // phase cannot complete before this — observation window for informational checks
             public bool failed;
         }
@@ -257,7 +258,6 @@ namespace CESupplyTestStaging
             switch (name)
             {
                 case "supply1": return BuildSupply1();
-                case "supply2": return BuildSupply2();
                 default: throw new InvalidOperationException("Unknown scenario: " + name);
             }
         }
@@ -705,57 +705,6 @@ namespace CESupplyTestStaging
             return phases;
         }
 
-        // -- SUPPLY-2: CE capacity gate on Simple Sidearms' own weapon retrieval --
 
-        private List<Phase> BuildSupply2()
-        {
-            Pawn roomy = Colonist("Roomy");
-            Pawn stuffed = Colonist("Stuffed");
-            ThingDef pistol = D("Gun_Autopistol");
-
-            return new List<Phase>
-            {
-                new Phase
-                {
-                    label = "capacity-aware-retrieval",
-                    deadlineTicks = 36000,
-                    // Hold the phase open: "did not fetch" is only meaningful after the pawn
-                    // has had as long to act as the one that did.
-                    minTicks = 15000,
-                    checks =
-                    {
-                        C("setting-precondition", () =>
-                        {
-                            bool on = CESidearmsSupply.SupplyMod.Settings.capacityAwareRetrieval;
-                            return (on, "capacityAwareRetrieval=" + on);
-                        }),
-                        C("stuffed-is-genuinely-full", () =>
-                        {
-                            // Without this the phase would pass for any reason a pawn failed
-                            // to fetch. Assert CE actually refuses the pistol for this pawn.
-                            CompInventory inv = stuffed.TryGetComp<CompInventory>();
-                            Thing probe = ThingMaker.MakeThing(pistol);
-                            bool fits = inv != null && inv.CanFitInInventory(probe, out int _);
-                            return (!fits, $"CE says pistol fits={fits} — weight {inv?.currentWeight:F1}/{inv?.capacityWeight:F1}"
-                                           + $" bulk {inv?.currentBulk:F1}/{inv?.capacityBulk:F1}");
-                        }),
-                        C("ss-retrieval-still-works", () =>
-                        {
-                            // Nothing in this module fetches weapons; SS's own job giver does.
-                            // If this fails, either SS stopped retrieving or the gate is
-                            // cancelling jobs it should not.
-                            bool has = CarriedWeaponDefs(roomy).Contains(pistol);
-                            return (has, "Roomy carries pistol=" + has);
-                        }),
-                        C("over-capacity-pawn-does-not-fetch", () =>
-                        {
-                            bool has = CarriedWeaponDefs(stuffed).Contains(pistol);
-                            CompInventory inv = stuffed.TryGetComp<CompInventory>();
-                            return (!has, $"Stuffed carries pistol={has} bulk {inv?.currentBulk:F1}/{inv?.capacityBulk:F1}");
-                        }),
-                    }
-                }
-            };
-        }
-    }
+            }
 }

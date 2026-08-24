@@ -54,19 +54,13 @@ namespace CESupplyTestStaging
             anchor = ComputeAnchor(map);
             Log.Message($"[SupplyStaging] Map {map.Size}, staging anchor {anchor}.");
 
-            // SUPPLY-2 exercises the CE-capacity gate on Simple Sidearms' own retrieval.
-            CESidearmsSupply.SupplyMod.Settings.capacityAwareRetrieval = true;
-            LoadedModManager.GetMod<CESidearmsSupply.SupplyMod>()?.WriteSettings();
-
             Stage1_LoadoutSidearms(map);
             SaveAndReset("SUPPLY-1-loadout-sidearms");
-            Stage2_Refetch(map);
-            SaveAndReset("SUPPLY-2-refetch");
 
             Find.TickManager.Pause();
             Log.Message("[SupplyStaging] All SUPPLY saves created.");
             Find.LetterStack.ReceiveLetter("SUPPLY saves created",
-                "Staged saves written: SUPPLY-1-loadout-sidearms, SUPPLY-2-refetch.\n\nQuit to main menu and Load one, then UNPAUSE and watch the reconcile/fetch happen. See TESTPLAN.md.",
+                "Staged save written: SUPPLY-1-loadout-sidearms.\n\nQuit to main menu and Load it, then UNPAUSE and watch the reconcile happen. See TESTPLAN.md.",
                 LetterDefOf.PositiveEvent);
 
             // -cesupplystage is an automated run by definition; waiting for a human to quit
@@ -133,63 +127,17 @@ namespace CESupplyTestStaging
         // CE's capacity model. Two colonists remember a pistol neither is carrying:
         // "Roomy" has space for it, "Stuffed" is loaded until CE reports no room. SS wants
         // to fetch for both; only Roomy should end up with one.
-        private void Stage2_Refetch(Map map)
-        {
-            ThingDef pistol = Need("Gun_Autopistol");
-
-            Pawn roomy = SpawnColonist(map, "Roomy", new IntVec3(-6, 0, -4));
-            RememberByDef(roomy, pistol);
-
-            Pawn stuffed = SpawnColonist(map, "Stuffed", new IntVec3(6, 0, -4));
-            RememberByDef(stuffed, pistol);
-            FillToCapacity(stuffed);
-
-            SpawnNear(map, anchor, pistol, null);
-            SpawnNear(map, anchor, pistol, null);
-            ThingDef ammo = FirstAmmoOf(pistol);
-            if (ammo != null)
-            {
-                SpawnStack(map, anchor, ammo, 200);
-            }
-        }
-
+        
         /// <summary>
         /// Load the pawn with cargo until CE reports no room for another weapon — the state
         /// SS's own retrieval ignores. Steel reaches the weight cap first, which is fine:
         /// CanFitInInventory refuses on either limit, and the runner asserts the refusal
         /// rather than assuming which one bound.
         /// </summary>
-        private void FillToCapacity(Pawn pawn)
-        {
-            CompInventory inventory = pawn.TryGetComp<CompInventory>();
-            ThingDef filler = Need("Steel");
-            int guard = 0;
-            while (guard++ < 40)
-            {
-                Thing stack = ThingMaker.MakeThing(filler);
-                stack.stackCount = filler.stackLimit;
-                if (!inventory.CanFitInInventory(stack, out int fit) || fit < 1)
-                {
-                    break;
-                }
-                stack.stackCount = fit;
-                inventory.container.TryAdd(stack, true);
-            }
-            inventory.UpdateInventory();
-            // Both limits matter: steel loads a pawn to the WEIGHT cap long before the bulk
-            // cap, and CanFitInInventory refuses on either.
-            Log.Message($"[SupplyStaging] {pawn.LabelShort} weight {inventory.currentWeight:F1}/{inventory.capacityWeight:F1} "
-                        + $"bulk {inventory.currentBulk:F1}/{inventory.capacityBulk:F1}");
-        }
-
+        
         // ---- helpers -------------------------------------------------------
 
-        private static void RememberByDef(Pawn pawn, ThingDef def)
-        {
-            CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
-            memory?.RememberedWeapons.Add(new ThingDefStuffDefPair(def, null));
-        }
-
+        
         private static ThingDef FirstAmmoOf(ThingDef weapon)
         {
             return weapon.GetCompProperties<CompProperties_AmmoUser>()?.ammoSet?.ammoTypes?.FirstOrDefault()?.ammo;

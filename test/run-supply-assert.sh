@@ -6,14 +6,13 @@
 #
 # Usage:
 #   ./test/run-supply-assert.sh supply1 SUPPLY-1-loadout-sidearms
-#   ./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
 #   SKIP_BUILD=1 ./test/run-supply-assert.sh ...
 #
 # Steam must be running. The game window opens but needs no interaction; the
 # whole run is bounded by `timeout` in case the runner wedges.
 set -euo pipefail
 
-SCENARIO="${1:?scenario (supply1|supply2)}"
+SCENARIO="${1:?scenario (supply1)}"
 SAVE="${2:?save name}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

@@ -7,7 +7,6 @@ writing `test-results-<scenario>.json` into the shared profile, then self-exits:
 ```
 ./test/run-supply-stage.sh                                  # regenerate SUPPLY saves (quit after letter)
 ./test/run-supply-assert.sh supply1 SUPPLY-1-loadout-sidearms
-./test/run-supply-assert.sh supply2 SUPPLY-2-refetch
 ```
 
 `supply1` covers, in 11 phases: initial reconcile and physical fetch (memory contents,
@@ -16,8 +15,7 @@ yielding to the loadout, a FORCED weapon surviving reconcile untouched, template
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
 an undeclared equipped weapon keeping the role while carried and the loadout taking over when
 it is stowed, and the gizmo-forget suppression sticking and then resuming when the weapon is
-put back in the list. `supply2` covers the CE-capacity gate on Simple Sidearms' own weapon
-retrieval.
+put back in the list.
 
 ## Benchmark
 
@@ -91,21 +89,6 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
 - Excess-drop check: pawn carrying derived ammo does NOT drop it during loadout enforcement
   (virtual slots feed GetExcessThing too).
 - CE ammo system disabled in CE settings → no derived ammo demand, no errors.
-
-## Capacity-aware retrieval (SUPPLY-2)
-
-This module does not fetch weapons — Simple Sidearms does, on its own, by default. What it
-adds is the capacity limit SS never checks (neither its job giver nor its pickup toil, which
-ends in a bare `innerContainer.TryAdd`).
-
-- SUPPLY-2: both colonists remember an uncarried pistol, with pistols in a pile. "Roomy" has
-  space and must end up carrying one — that also proves the gate is not cancelling retrievals
-  it should allow. "Stuffed" is loaded to CE's bulk limit and must NOT, because CE reports no
-  room. The phase is held open so "did not fetch" is only judged after the other pawn has had
-  as long to act.
-- Toggle the setting off → SS's retrieval runs unmodified, including for the over-capacity
-  pawn (manual check).
-- No fetch loop when no pistol exists on the map (SS simply generates no job).
 
 ## Regression
 
