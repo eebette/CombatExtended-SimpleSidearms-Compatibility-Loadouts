@@ -57,6 +57,13 @@ namespace CESupplyTestStaging
             // Without this a negative check passes at tick 0 — before the thing it forbids
             // could have happened — and is never looked at again.
             public bool negative;
+            // Something the phase needs to be TRUE before its real checks mean anything —
+            // the pawn is carrying the weapon, the role is set, the row exists. A phase whose
+            // precondition never holds is reported INVALID rather than passed or failed:
+            // it did not test what it claims to, and that is a different problem from the
+            // code being wrong. Unasserted preconditions are how every vacuous phase in this
+            // suite got that way.
+            public bool precondition;
             public bool passed;
             public string lastDetail = "not evaluated";
         }
@@ -64,6 +71,10 @@ namespace CESupplyTestStaging
         private class Phase
         {
             public string label;
+            // Establishes everything this phase depends on, so it inherits nothing from the
+            // phases before it. Runs once, before mutate. Paired with precondition checks:
+            // arrange makes it so, the preconditions prove it.
+            public Action arrange;
             public Action mutate;
             public List<Check> checks = new List<Check>();
             public int deadlineTicks;
@@ -71,6 +82,60 @@ namespace CESupplyTestStaging
             // to hold across, and the settle time for informational checks.
             public int minTicks;
             public bool failed;
+            public bool invalid;   // a precondition never held; the phase proved nothing
+            public string diagnostic;  // an unexpected error or warning seen during it
+        }
+
+        /// <summary>
+        /// Diagnostics we have accounted for and decided are not ours. Everything else — any
+        /// Error from any mod, any Warning not listed here — fails the phase it appeared in.
+        ///
+        /// Errors from CE or Simple Sidearms count against us on purpose: this suite exists
+        /// to prove the two work together, and breaking one of them is the most consequential
+        /// thing this module can do. Each entry below has to be justified, not just observed;
+        /// an allowlist built from "whatever showed up once" is how a real defect gets
+        /// permanently excused.
+        /// </summary>
+        private static readonly string[] ExpectedDiagnostics =
+        {
+            // Simple Sidearms sweeps its own memory on load and says so. Not provoked by us:
+            // it fires on a save this module has never touched.
+            "had a null weapon memory, removing",
+            "had a missing def or malformed data, removing",
+            // The harness itself.
+            "[SupplyTest]",
+            "[SupplyStaging]",
+        };
+
+        private readonly HashSet<string> seenDiagnostics = new HashSet<string>();
+
+        /// <summary>
+        /// Returns the first unaccounted-for error or warning since the last call.
+        ///
+        /// Log.Messages is a capped queue, so this reads the whole of it every poll and
+        /// remembers what it has already reported rather than tracking an index that the
+        /// queue can invalidate underneath it.
+        /// </summary>
+        private string NewDiagnostic()
+        {
+            foreach (LogMessage msg in Log.Messages)
+            {
+                if (msg.type != LogMessageType.Error && msg.type != LogMessageType.Warning)
+                {
+                    continue;
+                }
+                string text = msg.text ?? "";
+                if (!seenDiagnostics.Add(text))
+                {
+                    continue;
+                }
+                if (ExpectedDiagnostics.Any(e => text.Contains(e)))
+                {
+                    continue;
+                }
+                return $"{msg.type}: {text.Split('\n')[0]}";
+            }
+            return null;
         }
 
         private List<Phase> phases;
@@ -128,7 +193,22 @@ namespace CESupplyTestStaging
             }
 
             Phase phase = phases[phaseIndex];
+
+            // Any unaccounted-for error or warning, from this mod or from CE or SS, fails the
+            // phase it appeared in. Checked first: a phase that provoked a red error has not
+            // passed, whatever its assertions say.
+            string diagnostic = NewDiagnostic();
+            if (diagnostic != null)
+            {
+                phase.failed = true;
+                phase.diagnostic = diagnostic;
+                Log.Warning($"[SupplyTest] Phase '{phase.label}' FAILED on an unexpected diagnostic: {diagnostic}");
+                AdvancePhase();
+                return;
+            }
+
             bool allPass = true;
+            bool preconditionsHold = true;
             Check tripped = null;
             foreach (Check check in phase.checks)
             {
@@ -148,7 +228,11 @@ namespace CESupplyTestStaging
                     if (!pass && !check.informational)
                     {
                         allPass = false;
-                        if (check.negative)
+                        if (check.precondition)
+                        {
+                            preconditionsHold = false;
+                        }
+                        else if (check.negative)
                         {
                             tripped = check;
                         }
@@ -164,7 +248,7 @@ namespace CESupplyTestStaging
                 }
             }
 
-            if (tripped != null)
+            if (tripped != null && preconditionsHold)
             {
                 phase.failed = true;
                 Log.Warning($"[SupplyTest] Phase '{phase.label}' FAILED: '{tripped.name}' must not happen "
@@ -183,8 +267,17 @@ namespace CESupplyTestStaging
             }
             else if (tick - phaseStartTick > phase.deadlineTicks)
             {
-                phase.failed = true;
-                Log.Warning($"[SupplyTest] Phase '{phase.label}' FAILED (deadline {phase.deadlineTicks} ticks).");
+                // A phase whose preconditions never held did not test what it claims to.
+                // That is a broken test, not broken code, and conflating the two is how a
+                // suite quietly stops meaning anything.
+                phase.invalid = !preconditionsHold;
+                phase.failed = !phase.invalid;
+                string why = phase.invalid
+                    ? "INVALID — preconditions never held: "
+                      + string.Join(", ", phase.checks.Where(c => c.precondition && !c.passed)
+                                               .Select(c => $"{c.name} ({c.lastDetail})"))
+                    : $"FAILED (deadline {phase.deadlineTicks} ticks).";
+                Log.Warning($"[SupplyTest] Phase '{phase.label}' {why}");
                 AdvancePhase();
             }
         }
@@ -201,11 +294,15 @@ namespace CESupplyTestStaging
             phaseStartTick = Find.TickManager.TicksGame;
             try
             {
+                // Arrange first: establish everything this phase depends on rather than
+                // inheriting it from whatever the previous phases left behind. The
+                // precondition checks then prove it took.
+                phase.arrange?.Invoke();
                 phase.mutate?.Invoke();
             }
             catch (Exception e)
             {
-                Log.Error($"[SupplyTest] Mutation for phase '{phase.label}' threw: " + e);
+                Log.Error($"[SupplyTest] Setup for phase '{phase.label}' threw: " + e);
                 phase.failed = true;
                 foreach (Check c in phase.checks)
                 {
@@ -228,7 +325,7 @@ namespace CESupplyTestStaging
             var sb = new StringBuilder();
             sb.Append("{\n");
             sb.Append($"  \"scenario\": \"{scenario}\",\n");
-            bool overall = crashed == null && phases != null && phases.All(p => !p.failed);
+            bool overall = crashed == null && phases != null && phases.All(p => !p.failed && !p.invalid);
             sb.Append($"  \"passed\": {(overall ? "true" : "false")},\n");
             if (crashed != null)
             {
@@ -243,7 +340,12 @@ namespace CESupplyTestStaging
                     Phase p = phases[i];
                     sb.Append("    {\n");
                     sb.Append($"      \"label\": \"{Escape(p.label)}\",\n");
-                    sb.Append($"      \"passed\": {((!p.failed) ? "true" : "false")},\n");
+                    sb.Append($"      \"passed\": {((!p.failed && !p.invalid) ? "true" : "false")},\n");
+                    sb.Append($"      \"invalid\": {(p.invalid ? "true" : "false")},\n");
+                    if (p.diagnostic != null)
+                    {
+                        sb.Append($"      \"diagnostic\": \"{Escape(p.diagnostic)}\",\n");
+                    }
                     sb.Append($"      \"reached\": {(i <= phaseIndex ? "true" : "false")},\n");
                     sb.Append("      \"checks\": [\n");
                     for (int j = 0; j < p.checks.Count; j++)
@@ -253,6 +355,7 @@ namespace CESupplyTestStaging
                         sb.Append($"\"name\": \"{Escape(c.name)}\", ");
                         sb.Append($"\"passed\": {(c.passed ? "true" : "false")}, ");
                         sb.Append($"\"informational\": {(c.informational ? "true" : "false")}, ");
+                        sb.Append($"\"precondition\": {(c.precondition ? "true" : "false")}, ");
                         sb.Append($"\"detail\": \"{Escape(c.lastDetail)}\"");
                         sb.Append("}");
                         sb.Append(j < p.checks.Count - 1 ? ",\n" : "\n");
@@ -338,6 +441,17 @@ namespace CESupplyTestStaging
         private static Check N(string name, Func<(bool, string)> eval)
         {
             return new Check { name = name, eval = eval, negative = true };
+        }
+
+        /// <summary>
+        /// Something that must be true for the phase to mean anything. If it never holds the
+        /// phase reports INVALID — it did not test what it claims to, which is a different
+        /// failure from the code being wrong and should not be reported as either a pass or
+        /// a bug.
+        /// </summary>
+        private static Check P(string name, Func<(bool, string)> eval)
+        {
+            return new Check { name = name, eval = eval, precondition = true };
         }
 
         // The player's levers. The module's intent hooks only fire inside a gizmo

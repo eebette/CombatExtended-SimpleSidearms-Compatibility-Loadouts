@@ -37,17 +37,26 @@ def main(path):
             + ", ".join(p.get("label", "?") for p in unreached)
         )
 
-    failed = [p for p in phases if not p.get("passed", False)]
+    invalid = [p for p in phases if p.get("invalid", False)]
+    if invalid:
+        reasons.append(
+            f"{len(invalid)} phase(s) INVALID — preconditions never held, so they tested "
+            "nothing: " + ", ".join(p.get("label", "?") for p in invalid)
+        )
+
+    failed = [p for p in phases if not p.get("passed", False) and not p.get("invalid", False)]
     if failed:
         reasons.append(f"{len(failed)} phase(s) failed")
 
     ok = not reasons
     print(f"== {scenario}: {'PASS' if ok else 'FAIL'} "
-          f"({len(phases) - len(failed) - len(unreached)}/{len(phases)} phases) ==")
+          f"({len(phases) - len(failed) - len(invalid) - len(unreached)}/{len(phases)} phases) ==")
 
     for phase in phases:
         if not phase.get("reached", False):
             mark = "SKIP"
+        elif phase.get("invalid", False):
+            mark = "VOID"
         elif phase.get("passed", False):
             mark = "ok"
         else:
@@ -55,11 +64,18 @@ def main(path):
         print(f"  [{mark:>4}] {phase.get('label', '?')}")
         # Only expand a phase that went wrong. Informational checks are the
         # forensics for exactly that case, so show them here and nowhere else.
-        if mark == "FAIL":
+        if phase.get("diagnostic"):
+            print(f"         [diag] {phase['diagnostic']}")
+        if mark in ("FAIL", "VOID"):
             for check in phase.get("checks") or []:
                 if check.get("passed") and not check.get("informational"):
                     continue
-                kind = "info" if check.get("informational") else "FAIL"
+                if check.get("informational"):
+                    kind = "info"
+                elif check.get("precondition"):
+                    kind = "PRE"
+                else:
+                    kind = "FAIL"
                 print(f"         [{kind}] {check.get('name', '?')}: {check.get('detail', '')}")
 
     if reasons:
