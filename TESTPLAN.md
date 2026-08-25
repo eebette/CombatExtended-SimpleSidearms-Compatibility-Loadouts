@@ -107,6 +107,33 @@ ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
   (virtual slots feed GetExcessThing too).
 - CE ammo system disabled in CE settings → no derived ammo demand, no errors.
 
+## How a phase is built
+
+Each phase is `arrange -> wait for preconditions -> mutate -> assert`:
+
+- **arrange** establishes the world (Baseline: loadout assignment and rows, memory reseeded,
+  all player intent cleared) rather than inheriting it from earlier phases.
+- **P() preconditions** prove the arrangement took. If they never hold, the phase reports
+  INVALID/VOID — a broken test, not broken code — and mutate never fires.
+- **mutate** performs the act, only once the world is ready. Outcome checks are not evaluated
+  before it: a positive check latches, and evaluated pre-act it latches on the arranged world.
+- **N() negatives** re-evaluate every poll and must hold across `minTicks`. Any phase whose
+  name is a persistence claim ("never", "survives", "sticks") asserts it this way — a positive
+  check plus a window samples once and idles.
+- Every phase carries a **state dump** (informational, re-evaluates every poll). When it
+  disagrees with the checks beside it, a check has latched on the wrong world.
+
+Two suites, one set of phases: `run-supply-assert.sh` runs them in sequence against
+accumulated state (~3 min); `run-supply-isolated.sh` runs each in its own process against a
+freshly loaded save (~25 min, pre-release). A phase that passes in sequence and fails alone
+leans on something its arrange did not establish — that shape found three real harness bugs
+on its first run.
+
+New regression tests are verified with `test/verify-regression.sh <phase> <files>`: the fix is
+removed, the phase must FAIL (VOID is rejected — a setup break proves nothing about the fix),
+the fix restored, the suite must pass. A regression test never seen failing is an assertion,
+not a test.
+
 ## Known gaps
 
 - **SS's UI branch dispatch is not exercised.** The intent hooks fire inside a gizmo
