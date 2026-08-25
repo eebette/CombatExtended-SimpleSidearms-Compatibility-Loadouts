@@ -48,13 +48,18 @@ The second matters because cost only counts multiplied by rate, and the rate is 
 decide: it registers `JobGiver_UpdateLoadout` in the colonist behaviour tree's priority
 sorter, whose `GetPriority` bids 30f once the cooldown lapses.
 
-Measured 2026-08-23 (CE 16.7.3.0, SS v1.6):
+Measured (CE 16.7.3.0, SS v1.6):
 
 | | |
 |---|---|
-| reconcile overhead | **5.67 us/call** (183.45 patched vs 177.79 stock, whole TryGiveJob path) |
-| observed rate | **0.67 calls per colonist per 1000 ticks** (~one every 1500 ticks) |
-| cost at 20 colonists | **0.0005% of a 60fps frame** |
+| reconcile overhead | **18.41 us/call** (195.46 patched vs 177.05 stock, whole TryGiveJob path) |
+| observed rate | **0.79 calls per colonist per 1000 ticks** (~one every 1300 ticks) |
+| cost at 20 colonists | **0.0017% of a 60fps frame** |
+
+Re-measured 2026-08-25 against the set-difference reconcile. 3.2x the per-call cost of the
+three-phase design it replaced — Target/Apply allocate where the old phases mutated in place —
+and still ~1/600,000th of the frame budget, so no optimization pass is warranted. The prior
+figures (5.67 us, 0.67 calls, 0.0005%) are kept here for the comparison.
 
 That settles the trigger question: a single reconciling hook costs three orders of magnitude
 less than the 1%-of-frame bar set before measuring, so it stays, and no dirty-check or
