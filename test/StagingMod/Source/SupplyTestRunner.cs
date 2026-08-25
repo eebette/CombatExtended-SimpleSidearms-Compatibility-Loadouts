@@ -697,6 +697,12 @@ namespace CESupplyTestStaging
             InGizmo(() => Mem(pawn).InformOfAddedSidearm(weapon));
         }
 
+        private static bool InChoice(Func<bool> probe)
+        {
+            CESidearmsSupply.Patches.PlayerIntent.EnterChoice();
+            try { return probe(); } finally { CESidearmsSupply.Patches.PlayerIntent.ExitChoice(); }
+        }
+
         private static void PlayerClearsRangedRole(Pawn pawn)
         {
             InGizmo(() => Mem(pawn).UnsetRangedWeaponDefault());
@@ -725,6 +731,7 @@ namespace CESupplyTestStaging
             var beforeDelete = new HashSet<string>();
             bool pistolWasReleased = false;
             bool pistolWasExcluded = false;
+            ThingWithComps droppedPistol = null;
 
             var phases = new List<Phase>();
 
@@ -1506,6 +1513,131 @@ namespace CESupplyTestStaging
                     loadout.AddSlot(new LoadoutSlot(pistol, 1));
                     ForceReconcile(dockie);
                 },
+            });
+
+
+            // The machine-equip veto (#37). An excluded weapon is refused through
+            // EquipmentUtility.CanEquip — the registry CE consults at every site that arms a
+            // pawn autonomously — and offered normally while the player's own Equip option is
+            // built. Both halves pinned at the exact API the callers use, because the
+            // behavioural version (waiting for CE to re-arm from inventory) depends on which
+            // CE path fires in-window and would test its timing, not our veto.
+            phases.Add(new Phase
+            {
+                label = "a-suppressed-weapon-is-refused-to-the-machine-and-offered-to-the-player",
+                deadlineTicks = 12000,
+                minTicks = 600,
+                // The exclusion is CONTEXT for this phase, not its act — it belongs in
+                // arrange, or the preconditions that require it can never hold and the
+                // lifecycle correctly refuses to fire the mutate. The first draft had it in
+                // mutate and VOIDed itself; the harness catching its own author again.
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    // The act: take the primary away so the game's re-arm logic is live in
+                    // the window; the negative below holds whichever CE path fires.
+                    dockie.equipment.DestroyAllEquipment();
+                },
+                checks =
+                {
+                    P("pistol-is-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    P("pistol-still-carried", () =>
+                    {
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == pistol);
+                        return (carried, $"carried={carried}");
+                    }),
+                    C("machine-context-is-refused", () =>
+                    {
+                        var t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .FirstOrDefault(w => w.def == pistol);
+                        if (t == null) { return (false, "pistol not found"); }
+                        bool ok = EquipmentUtility.CanEquip(t, dockie, out string why);
+                        return (!ok, $"CanEquip={ok} reason='{why}'");
+                    }),
+                    C("player-context-is-offered", () =>
+                    {
+                        var t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .FirstOrDefault(w => w.def == pistol);
+                        if (t == null) { return (false, "pistol not found"); }
+                        bool ok = InChoice(() => EquipmentUtility.CanEquip(t, dockie, out string _));
+                        return (ok, $"CanEquip(inside the player's option build)={ok}");
+                    }),
+                    N("pistol-never-becomes-primary", () =>
+                    {
+                        bool isPrimary = dockie.equipment?.Primary?.def == pistol;
+                        return (!isPrimary, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            // The other half of the same design: the player's own Equip order goes through
+            // and IS the un-suppress gesture — one gesture in (gizmo forget), one gesture out
+            // (right-click, Equip).
+            phases.Add(new Phase
+            {
+                label = "a-player-equip-order-withdraws-the-exclusion",
+                deadlineTicks = 12000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    ThingWithComps t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == pistol);
+                    if (t != null)
+                    {
+                        // The dropdown path: the weapon on the ground, an ordered Equip job.
+                        dockie.inventory.innerContainer.TryDrop(t, dockie.Position, dockie.Map,
+                            ThingPlaceMode.Near, out Thing dropped);
+                        droppedPistol = dropped as ThingWithComps;
+                        if (droppedPistol != null)
+                        {
+                            dockie.jobs.TryTakeOrderedJob(JobMaker.MakeJob(JobDefOf.Equip, droppedPistol));
+                        }
+                    }
+                },
+                checks =
+                {
+                    P("pistol-starts-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    C("ordered-equip-ran", () =>
+                    {
+                        // Act-created, so an outcome check: the drop happened and the pawn
+                        // either has the job or has already completed it.
+                        bool have = droppedPistol != null;
+                        bool job = dockie.CurJobDef == JobDefOf.Equip
+                                   || dockie.jobs.jobQueue.Any(j => j.job.def == JobDefOf.Equip);
+                        return (have && (job || dockie.equipment?.Primary?.def == pistol),
+                                $"dropped={have} equipJob={job}");
+                    }),
+                    C("exclusion-withdrawn", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (!excluded, $"still excluded={excluded}");
+                    }),
+                    C("pistol-remembered-again", () =>
+                    {
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
+                        return (remembered, $"remembered={remembered}");
+                    }),
+                }
             });
 
             return phases;

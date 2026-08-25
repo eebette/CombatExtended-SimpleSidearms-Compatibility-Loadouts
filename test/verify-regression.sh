@@ -59,6 +59,9 @@ trap restore EXIT
 build; run
 A=$(phase_state)
 restore; trap - EXIT
+# The A leg built the mod from the reverted source; put the real build back even on
+# the rejection paths, or the tree is left with a stale DLL that poisons the next build.
+build
 
 case "$A" in
     failed)  echo "   A: failed — the test detects the regression" ;;
@@ -68,7 +71,7 @@ case "$A" in
 esac
 
 echo "== B: fix restored, expecting the suite to pass =="
-build; run
+run
 if [[ "$(phase_state)" != "passed" ]]; then
     echo "!! B: '$PHASE' is $(phase_state) with the fix in place" >&2
     exit 1

@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using UnityEngine;
+using RimWorld;
 using SimpleSidearms.rimworld;
 using Verse;
 
@@ -28,8 +29,26 @@ namespace CESidearmsSupply.Patches
     public static class PlayerIntent
     {
         [ThreadStatic] private static int gizmoDepth;
+        [ThreadStatic] private static int choiceDepth;
 
         internal static bool PlayerIsDriving => gizmoDepth > 0;
+
+        /// <summary>
+        /// Raised while the game builds the player's own right-click Equip option. The
+        /// CanEquip veto stands down here and only here, so the dropdown stays live while
+        /// every machine path that consults CanEquip is refused.
+        /// </summary>
+        internal static bool PlayerChoosing => choiceDepth > 0;
+
+        internal static void EnterChoice() => choiceDepth++;
+
+        internal static void ExitChoice()
+        {
+            if (choiceDepth > 0)
+            {
+                choiceDepth--;
+            }
+        }
 
         internal static void Enter() => gizmoDepth++;
 
@@ -254,5 +273,80 @@ namespace CESidearmsSupply.Patches
                 rec.meleeRoleVetoed = false;
             }
         }
+    }
+
+    /// <summary>
+    /// The machine-equip veto. A weapon the player took out of a pawn's sidearm rotation is
+    /// refused through the game's own per-pawn equip-refusal registry — the same hook
+    /// vanilla's biocode, bladelink and ideoligion role bans live in, and the one Combat
+    /// Extended consults at every site that arms a pawn autonomously: its loadout job's
+    /// candidate validator and all of SwitchToNextViableWeapon's picks. Refusing here removes
+    /// the weapon from those selections cleanly — CE takes its next candidate — instead of
+    /// cancelling a decided job from outside.
+    ///
+    /// The veto stands down while the player's own Equip option is being built (see
+    /// PlayerChoosing), so the dropdown stays live: choosing it issues a playerForced job,
+    /// the equip goes through, and the withdrawal hook above clears the exclusion. One
+    /// gesture out, symmetric with the one gesture in.
+    /// </summary>
+    [HarmonyPatch(typeof(EquipmentUtility), nameof(EquipmentUtility.CanEquip),
+                  new[] { typeof(Thing), typeof(Pawn), typeof(string), typeof(bool) },
+                  new[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Out, ArgumentType.Normal })]
+    public static class EquipmentUtility_CanEquip_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(EquipmentUtility), nameof(EquipmentUtility.CanEquip),
+                    new[] { typeof(Thing), typeof(Pawn), typeof(string).MakeByRefType(), typeof(bool) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] EquipmentUtility.CanEquip not found — excluded weapons "
+                      + "can be re-equipped by the game and will re-enter the sidearm rotation.");
+            return false;
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(Thing thing, Pawn pawn, ref string cantReason, ref bool __result)
+        {
+            if (!__result || PlayerIntent.PlayerChoosing || thing?.def == null || pawn == null)
+            {
+                return;
+            }
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            if (rec == null || rec.dontEquip.Count == 0)
+            {
+                return;
+            }
+            if (rec.dontEquip.Contains(new ThingDefStuffDefPair(thing.def, thing.Stuff)))
+            {
+                __result = false;
+                cantReason = "excluded from " + pawn.LabelShort + "'s sidearm rotation";
+            }
+        }
+    }
+
+    /// <summary>The stand-down scope: the player's Equip option is being built.</summary>
+    [HarmonyPatch(typeof(FloatMenuOptionProvider_Equip), "GetSingleOptionFor",
+                  new[] { typeof(Thing), typeof(FloatMenuContext) })]
+    public static class FloatMenuOptionProvider_Equip_GetSingleOptionFor_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(FloatMenuOptionProvider_Equip), "GetSingleOptionFor",
+                    new[] { typeof(Thing), typeof(FloatMenuContext) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] FloatMenuOptionProvider_Equip.GetSingleOptionFor not found — "
+                      + "the Equip option will show excluded weapons as refused instead of offering them.");
+            return false;
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix() => PlayerIntent.EnterChoice();
+
+        [HarmonyFinalizer]
+        public static void Finalizer() => PlayerIntent.ExitChoice();
     }
 }
