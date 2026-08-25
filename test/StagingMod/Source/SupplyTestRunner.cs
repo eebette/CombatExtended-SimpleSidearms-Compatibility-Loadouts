@@ -83,6 +83,12 @@ namespace CESupplyTestStaging
             public int minTicks;
             public bool failed;
             public bool invalid;   // a precondition never held; the phase proved nothing
+            // mutate is deferred until every precondition holds. Firing it immediately after
+            // arrange means firing it into a world that has not caught up — CE has not
+            // hauled, the reconcile has not run, the memory is not seeded. In a sequenced run
+            // that is invisible because earlier phases already settled things; alone it is
+            // the difference between testing something and testing nothing.
+            public bool mutated;
             public string diagnostic;  // an unexpected error or warning seen during it
         }
 
@@ -295,6 +301,38 @@ namespace CESupplyTestStaging
                 }
             }
 
+            // Preconditions hold and the act has not happened yet: this is the moment the
+            // world is ready for it.
+            if (preconditionsHold && !phase.mutated)
+            {
+                phase.mutated = true;
+                phaseStartTick = tick;   // the observation window starts from the act
+                try
+                {
+                    phase.mutate?.Invoke();
+                }
+                catch (Exception e)
+                {
+                    Log.Error($"[SupplyTest] Mutation for phase '{phase.label}' threw: " + e);
+                    phase.failed = true;
+                    AdvancePhase();
+                }
+                return;
+            }
+            // Nothing the phase asserts means anything until its act has happened.
+            if (!phase.mutated)
+            {
+                if (tick - phaseStartTick > phase.deadlineTicks)
+                {
+                    phase.invalid = true;
+                    Log.Warning($"[SupplyTest] Phase '{phase.label}' INVALID — preconditions never held: "
+                                + string.Join(", ", phase.checks.Where(c => c.precondition && !c.passed)
+                                                         .Select(c => $"{c.name} ({c.lastDetail})")));
+                    AdvancePhase();
+                }
+                return;
+            }
+
             if (tripped != null && preconditionsHold)
             {
                 phase.failed = true;
@@ -341,11 +379,13 @@ namespace CESupplyTestStaging
             phaseStartTick = Find.TickManager.TicksGame;
             try
             {
-                // Arrange first: establish everything this phase depends on rather than
-                // inheriting it from whatever the previous phases left behind. The
-                // precondition checks then prove it took.
+                // Arrange only. mutate waits for the preconditions to hold — see Phase.mutated.
                 phase.arrange?.Invoke();
-                phase.mutate?.Invoke();
+                if (!phase.checks.Any(c => c.precondition))
+                {
+                    phase.mutate?.Invoke();
+                    phase.mutated = true;
+                }
             }
             catch (Exception e)
             {
@@ -974,6 +1014,14 @@ namespace CESupplyTestStaging
                 mutate = () => PlayerForgets(dockie, pistol),
                 checks =
                 {
+                    P("pistol-is-remembered-first", () =>
+                    {
+                        // Forgetting something SS does not remember calls nothing, records
+                        // nothing, and the phase then blames the code for it.
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
+                        return (remembered, $"pistol remembered={remembered}");
+                    }),
+
                     C("stays-forgotten", () =>
                     {
                         bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
@@ -1097,6 +1145,15 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
+                    P("gladius-is-remembered-first", () =>
+                    {
+                        // The mutate forces the gladius only if it can find a pair. No pair,
+                        // no force, and force-never-cleared then reports forced=none as
+                        // though this module had cleared it.
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == gladius);
+                        return (remembered, $"gladius remembered={remembered}");
+                    }),
+
                     N("force-never-cleared", () =>
                     {
                         var forced = Mem(dockie).ForcedWeapon;
@@ -1155,6 +1212,15 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
+                    P("sniper-is-the-default-first", () =>
+                    {
+                        // Clearing a role that was never set proves nothing about whether the
+                        // projection restores a cleared one.
+                        var def = Mem(dockie).DefaultRangedWeapon;
+                        return (def.HasValue && def.Value.thing == sniper,
+                                $"defaultRanged={def?.thing?.defName ?? "none"}");
+                    }),
+
                     N("ranged-default-stays-cleared", () =>
                     {
                         var def = Mem(dockie).DefaultRangedWeapon;
