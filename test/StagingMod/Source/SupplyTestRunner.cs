@@ -613,14 +613,31 @@ namespace CESupplyTestStaging
                         bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == revolver);
                         return (!present, $"revolver remembered={present} (loadout owns what it lists)");
                     }),
-                    C("ce-free-to-drop-it", () =>
+                    C("drop-exemption-lifted", () =>
+                    {
+                        // The compat patch exempts a weapon from CE's drop for exactly as
+                        // long as SS remembers it, so releasing the claim is the whole of
+                        // this module's contribution. Whether CE then drops it depends on
+                        // hold records, dropUndefined and what else is excess — CE's call,
+                        // not ours to assert.
+                        //
+                        // This used to also accept "the pawn no longer carries it", which
+                        // passed because ForceReconcile ran CE's entire TryGiveJob and that
+                        // physically drops inventory. Calling the reconcile directly removed
+                        // the side effect and left the check resting on an escape hatch.
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == revolver);
+                        bool claimed = rec != null && rec.claimed.Any(p => p.thing == revolver);
+                        return (!remembered && !claimed,
+                                $"remembered={remembered} claimed={claimed}");
+                    }),
+                    C("ce-view-of-excess", () =>
                     {
                         bool excess = Utility_HoldTracker.GetExcessThing(dockie, out Thing dropThing, out int _);
-                        bool targeted = excess && dropThing?.def == revolver;
                         bool stillCarried = CarriedWeaponDefs(dockie).Contains(revolver);
-                        return (targeted || !stillCarried,
-                            $"excess={excess} dropThing={dropThing?.def?.defName ?? "none"} stillCarried={stillCarried}");
-                    }),
+                        return (true, $"excess={excess} dropThing={dropThing?.def?.defName ?? "none"} "
+                                      + $"revolverStillCarried={stillCarried}");
+                    }, informational: true),
                 }
             });
 
