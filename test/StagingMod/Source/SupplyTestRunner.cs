@@ -265,6 +265,15 @@ namespace CESupplyTestStaging
             Check tripped = null;
             foreach (Check check in phase.checks)
             {
+                // Nothing but a precondition may be evaluated before the act. The loop
+                // evaluates checks and then fires mutate on the same poll, so without this an
+                // outcome check runs against the freshly-arranged world — where it is often
+                // trivially true — and latches there, recording the state before the thing it
+                // exists to observe ever happened.
+                if (!phase.mutated && !check.precondition)
+                {
+                    continue;
+                }
                 // Informational checks re-evaluate until the phase ends (their last
                 // observation is what gets reported) and never gate advancement. Negative
                 // checks re-evaluate because a must-not-happen that passes now can still
@@ -575,6 +584,19 @@ namespace CESupplyTestStaging
                 memory.ForgetSidearmMemory(pair);
             }
 
+            // Assignment before contents. A phase ordered after one that deletes the loadout
+            // finds the pawn on the default one and this object detached from the manager, so
+            // rebuilding its rows would arrange a loadout nobody is assigned to and every
+            // reconcile would early-return. Establishing a world means establishing that too.
+            if (!LoadoutManager.Loadouts.Contains(loadout))
+            {
+                LoadoutManager.AddLoadout(loadout);
+            }
+            if (pawn.GetLoadout() != loadout)
+            {
+                pawn.SetLoadout(loadout);
+            }
+
             loadout._slots.Clear();
             foreach (ThingDef def in rows)
             {
@@ -657,6 +679,7 @@ namespace CESupplyTestStaging
 
             var beforeDelete = new HashSet<string>();
             bool pistolWasReleased = false;
+            bool pistolWasExcluded = false;
 
             var phases = new List<Phase>();
 
@@ -1349,6 +1372,82 @@ namespace CESupplyTestStaging
             });
 
 
+
+
+            // The lifecycle nobody had a test for, and which regressed unnoticed through three
+            // reviews: an exclusion follows its loadout row. Take the weapon out and put it
+            // back, and the pawn manages it again. Without the prune this passes for the
+            // wrong reason only if the exclusion was never set, which the precondition rules
+            // out.
+            phases.Add(new Phase
+            {
+                label = "an-exclusion-is-cleared-by-removing-and-re-adding-the-row",
+                deadlineTicks = 8000,
+                minTicks = 300,
+                // Arrange only baselines. Excluding the pistol is an ACT, and acts belong in
+                // mutate — it needs the pistol to be remembered first, which Baseline sets up
+                // asynchronously. Doing it here is how this phase VOIDed on its first run.
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                checks =
+                {
+                    P("pistol-is-remembered-before-we-exclude-it", () =>
+                    {
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
+                        return (remembered, $"remembered={remembered}");
+                    }),
+                    C("the-exclusion-was-actually-set", () =>
+                    {
+                        // Sampled inside mutate. Without it, "no longer excluded" at the end
+                        // passes just as well when the exclusion was never set in the first
+                        // place — which is exactly how this phase first went wrong.
+                        return (pistolWasExcluded, $"exclusion took={pistolWasExcluded}");
+                    }),
+                    C("row-round-trip-clears-it", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
+                        return (!excluded, $"still excluded={excluded}");
+                    }),
+                    C("exclusion-forensics", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        string excl = rec == null ? "no-record"
+                            : string.Join(",", rec.dontEquip.Select(p => p.thing?.defName));
+                        string clm = rec == null ? "-"
+                            : string.Join(",", rec.claimed.Select(p => p.thing?.defName));
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == pistol);
+                        return (true, $"setAt={pistolWasExcluded} dontEquip=[{excl}] claimed=[{clm}] "
+                                      + $"pistolCarried={carried} row={SlotOf(pistol) != null} "
+                                      + $"curJob={dockie.CurJobDef?.defName ?? "none"} "
+                                      + $"forced={dockie.CurJob?.playerForced}");
+                    }, informational: true),
+                    C("and-the-pistol-is-managed-again", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claimed = rec != null && rec.claimed.Any(p => p.thing == pistol);
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
+                        return (claimed && remembered, $"claimed={claimed} remembered={remembered}");
+                    }),
+                },
+                mutate = () =>
+                {
+                    PlayerForgets(dockie, pistol);
+                    var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    pistolWasExcluded = recNow != null && recNow.dontEquip.Any(p => p.thing == pistol);
+
+                    // No drop in between: the pawn keeps carrying it throughout, so this also
+                    // pins that re-claiming does not depend on CE re-fetching anything.
+                    LoadoutSlot slot = SlotOf(pistol);
+                    if (slot != null)
+                    {
+                        loadout.RemoveSlot(slot);
+                    }
+                    ForceReconcile(dockie);
+                    loadout.AddSlot(new LoadoutSlot(pistol, 1));
+                    ForceReconcile(dockie);
+                },
+            });
 
             return phases;
         }

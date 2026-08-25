@@ -116,6 +116,15 @@ namespace CESidearmsSupply.Patches
             ThingDefStuffDefPair? forced = memory.ForcedWeapon;
             ThingDefStuffDefPair? forcedDrafted = memory.ForcedWeaponWhileDrafted;
 
+            // An exclusion follows its row. Take the weapon out of the loadout and put it
+            // back and the pawn manages it again, rather than it staying silently excluded
+            // forever with nothing in any UI to say why.
+            //
+            // Note this is not reached on the default loadout — the early return above treats
+            // that as no opinion, so deleting a loadout does not quietly discard the player's
+            // exclusions along with everything else.
+            rec.dontEquip.RemoveAll(p => p.thing == null || !declared.Contains(p.thing));
+
             HashSet<ThingDefStuffDefPair> target = Target(pawn, rec, declared);
 
             Apply(memory, rec, target, forced, forcedDrafted);
