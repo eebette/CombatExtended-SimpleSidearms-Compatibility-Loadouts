@@ -245,7 +245,7 @@ namespace CESidearmsSupply.Patches
             if (!forcedRanged && !rec.rangedRoleVetoed
                 && !PlayersAndInHand(pawn, memory.DefaultRangedWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, d => d.IsRangedWeapon);
+                ThingDefStuffDefPair? pick = First(declared, target, rec, d => d.IsRangedWeapon);
                 if (pick.HasValue && memory.DefaultRangedWeapon != pick)
                 {
                     memory.SetRangedWeaponTypeAsDefault(pick.Value);
@@ -258,7 +258,7 @@ namespace CESidearmsSupply.Patches
             }
             if (!PlayersAndInHand(pawn, memory.PreferredMeleeWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, d => d.IsMeleeWeapon);
+                ThingDefStuffDefPair? pick = First(declared, target, rec, d => d.IsMeleeWeapon);
                 if (pick.HasValue && memory.PreferredMeleeWeapon != pick)
                 {
                     memory.SetMeleeWeaponTypeAsPreferred(pick.Value);
@@ -266,20 +266,35 @@ namespace CESidearmsSupply.Patches
             }
         }
 
-        /// <summary>First declared def of this category with a pair in the target set.</summary>
+        /// <summary>
+        /// First declared def of this category with a pair in the target set.
+        ///
+        /// `target` is a set, so with two materials of one def carried the answer would
+        /// otherwise depend on enumeration order — which follows inventory order, which CE's
+        /// constant ammo churn reorders. Every flip re-set the role and made the pawn
+        /// physically swap weapons. Prefer the pair already claimed, so a settled role stays
+        /// settled, and fall back to a deterministic key rather than to whatever comes first.
+        /// </summary>
         private static ThingDefStuffDefPair? First(List<ThingDef> declared,
                                                    HashSet<ThingDefStuffDefPair> target,
+                                                   CompLoadoutSidearms rec,
                                                    Func<ThingDef, bool> category)
         {
             foreach (ThingDef def in declared.Where(category))
             {
-                foreach (ThingDefStuffDefPair pair in target)
+                List<ThingDefStuffDefPair> candidates = target.Where(p => p.thing == def).ToList();
+                if (candidates.Count == 0)
                 {
-                    if (pair.thing == def)
+                    continue;
+                }
+                foreach (ThingDefStuffDefPair claimed in rec.claimed)
+                {
+                    if (candidates.Contains(claimed))
                     {
-                        return pair;
+                        return claimed;
                     }
                 }
+                return candidates.OrderBy(p => p.stuff?.defName ?? string.Empty).First();
             }
             return null;
         }

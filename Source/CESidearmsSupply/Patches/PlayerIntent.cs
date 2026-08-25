@@ -123,7 +123,19 @@ namespace CESidearmsSupply.Patches
         }
     }
 
-    /// <summary>Putting it back in the list by hand withdraws that.</summary>
+    /// <summary>
+    /// Putting it back by hand withdraws the exclusion.
+    ///
+    /// Wider than the gizmo, deliberately. "Equip as sidearm" and plain "Equip" from the
+    /// right-click menu both mean the player wants this weapon, and both reach here from a
+    /// job rather than from the gizmo — SS's own float menu issues EquipSecondary through
+    /// TryTakeOrderedJob, which stamps playerForced, and vanilla's Equip does the same. CE's
+    /// autonomous equip does not, which is the distinction that matters.
+    ///
+    /// Only the WITHDRAWAL side is widened. Recording an exclusion the player did not ask
+    /// for is silent and permanent; lifting one they did not ask for costs a single click to
+    /// re-express. The asymmetry is the point.
+    /// </summary>
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.InformOfAddedSidearm))]
     public static class CompSidearmMemory_InformOfAddedSidearm_Patch
     {
@@ -133,7 +145,12 @@ namespace CESidearmsSupply.Patches
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance, Thing weapon)
         {
-            if (!PlayerIntent.PlayerIsDriving || weapon?.def == null)
+            if (weapon?.def == null)
+            {
+                return;
+            }
+            bool playerOrdered = __instance?.Owner?.CurJob?.playerForced ?? false;
+            if (!PlayerIntent.PlayerIsDriving && !playerOrdered)
             {
                 return;
             }
