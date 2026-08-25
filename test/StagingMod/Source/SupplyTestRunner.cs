@@ -105,6 +105,11 @@ namespace CESupplyTestStaging
             // The harness itself.
             "[SupplyTest]",
             "[SupplyStaging]",
+            // RimBridge logs startup telemetry at Warning level, and its startup straddles
+            // the point where this scenario baselines the log. It is a development tool in
+            // this profile, is not shipped with the mod, and nothing here can provoke it.
+            // A pre-release profile trimmed to CE + SS + this mod would not need the entry.
+            "[RimBridge] STARTUP_TIMING",
         };
 
         private readonly HashSet<string> seenDiagnostics = new HashSet<string>();
@@ -116,6 +121,20 @@ namespace CESupplyTestStaging
         /// remembers what it has already reported rather than tracking an index that the
         /// queue can invalidate underneath it.
         /// </summary>
+        /// <summary>
+        /// Everything already in the log when the scenario starts is somebody else's: mod
+        /// metadata complaints, startup telemetry, whatever the profile's other mods say on
+        /// their way up. Only what the run provokes can be attributed to it.
+        /// </summary>
+        private void BaselineDiagnostics()
+        {
+            foreach (LogMessage msg in Log.Messages)
+            {
+                seenDiagnostics.Add(msg.text ?? "");
+            }
+            Log.Message($"[SupplyTest] Diagnostics baselined at {seenDiagnostics.Count} pre-existing message(s).");
+        }
+
         private string NewDiagnostic()
         {
             foreach (LogMessage msg in Log.Messages)
@@ -169,6 +188,7 @@ namespace CESupplyTestStaging
                     Root.Shutdown();
                     return;
                 }
+                BaselineDiagnostics();
                 active = true;
                 Find.TickManager.CurTimeSpeed = TimeSpeed.Superfast;
                 Log.Message($"[SupplyTest] Scenario '{scenario}' started, {phases.Count} phases.");
@@ -1045,11 +1065,39 @@ namespace CESupplyTestStaging
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == shotgun);
                         return (excluded, $"shotgun in dontEquip={excluded}");
                     }),
-                    N("never-re-remembered", () =>
+                    P("shotgun-is-carried-again", () =>
                     {
-                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
-                        return (!remembered, $"shotgun remembered again={remembered}");
+                        // CE hauls it back for the still-declared row. Until it has, this
+                        // phase is not yet testing the thing it claims to.
+                        var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == shotgun);
+                        return (carried, $"carried={carried}");
                     }),
+                    N("never-re-claimed", () =>
+                    {
+                        // What this module controls. NOT "SS never remembers it again": the
+                        // row is declared, so CE may equip the shotgun as primary, and SS's
+                        // JustBeforeEquip then remembers it through InformOfAddedPrimary with
+                        // nothing of ours involved. Asserting against that made this phase
+                        // fail or pass on CE's equip timing.
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claimed = rec != null && rec.claimed.Any(p => p.thing == shotgun);
+                        return (!claimed, $"shotgun re-claimed by the projection={claimed}");
+                    }),
+                    C("forget-forensics", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        string excl = rec == null ? "no-record"
+                            : string.Join(",", rec.dontEquip.Select(p => $"{p.thing?.defName}/{p.stuff?.defName ?? "null"}"));
+                        string mem = string.Join(",", Mem(dockie).RememberedWeapons
+                            .Select(p => $"{p.thing?.defName}/{p.stuff?.defName ?? "null"}"));
+                        var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .FirstOrDefault(w => w.def == shotgun);
+                        return (true, $"dontEquip=[{excl}] remembered=[{mem}] "
+                                      + $"carriedShotgun={(carried == null ? "none" : carried.Stuff?.defName ?? "null-stuff")} "
+                                      + $"curJob={dockie.CurJobDef?.defName ?? "none"} "
+                                      + $"playerForced={dockie.CurJob?.playerForced}");
+                    }, informational: true),
                     C("row-still-declared-so-ce-keeps-hauling-it", () =>
                     {
                         bool declared = loadout.Slots.Any(sl => sl.thingDef == shotgun);
