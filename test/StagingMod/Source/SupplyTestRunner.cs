@@ -199,6 +199,15 @@ namespace CESupplyTestStaging
                 try
                 {
                     phases = BuildScenario(scenario);
+                    // Every phase carries the state dump; forgetting to add it per-phase is
+                    // exactly the kind of omission it exists to catch.
+                    foreach (Phase ph in phases)
+                    {
+                        if (!ph.checks.Any(c => c.name == "state"))
+                        {
+                            ph.checks.Add(State(Colonist("Dockie"), () => Colonist("Dockie").GetLoadout()));
+                        }
+                    }
                     totalPhaseCount = phases.Count;
                     if (isolatedPhase >= 0)
                     {
@@ -539,6 +548,42 @@ namespace CESupplyTestStaging
             return new Check { name = name, eval = eval, informational = informational };
         }
 
+        /// <summary>
+        /// The standing state dump every phase carries. Informational checks re-evaluate on
+        /// every poll while positive ones latch — so this reports live state where the checks
+        /// beside it report history, and a disagreement between the two is how a check that
+        /// latched on the wrong world gets caught. That exact divergence is what exposed the
+        /// pre-act latching defect; this makes the tripwire standing rather than a hunch.
+        /// </summary>
+        private static Check State(Pawn pawn, Func<Loadout> loadoutOf)
+        {
+            return new Check
+            {
+                name = "state",
+                informational = true,
+                eval = () =>
+                {
+                    CompSidearmMemory m = Mem(pawn);
+                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(pawn);
+                    string mem = string.Join(",", m.RememberedWeapons.Select(pr => pr.thing?.defName));
+                    string clm = rec == null ? "-" : string.Join(",", rec.claimed.Select(pr => pr.thing?.defName));
+                    string exc = rec == null ? "-" : string.Join(",", rec.dontEquip.Select(pr => pr.thing?.defName));
+                    string carried = string.Join(",", pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .Select(w => w.def.defName));
+                    Loadout lo = loadoutOf();
+                    string rows = lo == null ? "-" : string.Join(",", lo.Slots.Where(sl => sl.thingDef != null)
+                        .Select(sl => sl.thingDef.defName));
+                    return (true,
+                        $"mem=[{mem}] claimed=[{clm}] dontEquip=[{exc}] carried=[{carried}] rows=[{rows}] "
+                        + $"ranged={m.DefaultRangedWeapon?.thing?.defName ?? "-"} "
+                        + $"melee={m.PreferredMeleeWeapon?.thing?.defName ?? "-"} "
+                        + $"forced={m.ForcedWeapon?.thing?.defName ?? "-"} "
+                        + $"vetoR={rec?.rangedRoleVetoed} vetoM={rec?.meleeRoleVetoed} "
+                        + $"job={pawn.CurJobDef?.defName ?? "-"}");
+                },
+            };
+        }
+
         /// <summary>A must-not-happen check. Held across the whole phase, not just sampled once.</summary>
         private static Check N(string name, Func<(bool, string)> eval)
         {
@@ -814,6 +859,10 @@ namespace CESupplyTestStaging
                 // must not touch a forced weapon: SetRangedWeaponTypeAsDefault would clear it.
                 label = "forced-weapon-is-never-touched",
                 deadlineTicks = 6000,
+                // "Never" is a claim about a window, not a sample. A positive check latches on
+                // its first pass, so C + minTicks would sample once and idle; only a negative
+                // re-evaluates every poll for the whole window.
+                minTicks = 600,
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -823,7 +872,7 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
-                    C("force-survives-reconcile", () =>
+                    N("force-holds-for-the-whole-window", () =>
                     {
                         ThingDef forced = Mem(dockie).ForcedWeapon?.thing;
                         return (forced == pistol, "forced=" + (forced?.defName ?? "null"));
@@ -852,6 +901,7 @@ namespace CESupplyTestStaging
             {
                 label = "manual-memory-protected",
                 deadlineTicks = 6000,
+                minTicks = 600,
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -869,8 +919,10 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
-                    C("manual-shotgun-survives-template-churn", () =>
+                    N("manual-shotgun-survives-template-churn", () =>
                     {
+                        // Held across the window: the churn is over, so nothing may remove
+                        // this memory on any later reconcile either.
                         bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
                         return (present, "shotgun remembered=" + present);
                     }),
@@ -1033,6 +1085,7 @@ namespace CESupplyTestStaging
             {
                 label = "gizmo-forget-of-declared-weapon-sticks",
                 deadlineTicks = 6000,
+                minTicks = 600,
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () => PlayerForgets(dockie, pistol),
                 checks =
@@ -1045,10 +1098,16 @@ namespace CESupplyTestStaging
                         return (remembered, $"pistol remembered={remembered}");
                     }),
 
-                    C("stays-forgotten", () =>
+                    N("never-re-claimed", () =>
                     {
-                        bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
-                        return (!remembered, $"pistol remembered={remembered} (player took it out of the list)");
+                        // The windowed negative is over what this module controls. "Never
+                        // remembered again by anyone" is not assertable — the row is still
+                        // declared, so CE may equip the pistol as primary and SS re-remembers
+                        // it through InformOfAddedPrimary with nothing of ours involved; that
+                        // exact over-assertion made the sister phase flake on CE's timing.
+                        var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claimed = recNow != null && recNow.claimed.Any(p => p.thing == pistol);
+                        return (!claimed, $"pistol re-claimed by the projection={claimed}");
                     }),
                     C("recorded-as-player-intent", () =>
                     {
