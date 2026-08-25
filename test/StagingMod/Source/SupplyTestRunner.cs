@@ -305,20 +305,8 @@ namespace CESupplyTestStaging
                    ?? new List<ThingDef>();
         }
 
-        private static int MagOf(ThingDef weapon)
-        {
-            var props = weapon.GetCompProperties<CompProperties_AmmoUser>();
-            if (props == null) return 0;
-            return props.AmmoGenPerMagOverride > 0 ? props.AmmoGenPerMagOverride
-                 : props.magazineSize > 0 ? props.magazineSize : 25;
-        }
-
-        private static int CarriedAmmoCount(Pawn pawn, ThingDef weapon)
-        {
-            List<ThingDef> set = AmmoSetOf(weapon);
-            return pawn.inventory.innerContainer.Where(t => set.Contains(t.def)).Sum(t => t.stackCount);
-        }
-
+        
+        
         private static List<ThingDef> CarriedWeaponDefs(Pawn pawn)
         {
             return pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true).Select(w => w.def).ToList();
@@ -340,12 +328,7 @@ namespace CESupplyTestStaging
             return pawn.GetLoadout().GetSlotsFor(pawn).ToList();
         }
 
-        private static int StreamAmmoCount(Pawn pawn, ThingDef weapon)
-        {
-            List<ThingDef> set = AmmoSetOf(weapon);
-            return Stream(pawn).Where(s => s.thingDef != null && set.Contains(s.thingDef)).Sum(s => s.count);
-        }
-
+        
         private static Check C(string name, Func<(bool, string)> eval, bool informational = false)
         {
             return new Check { name = name, eval = eval, informational = informational };

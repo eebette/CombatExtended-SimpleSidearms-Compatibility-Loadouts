@@ -78,6 +78,12 @@ Ad-hoc means *this pawn's primary is not in the loadout — keep it and feed it*
 it for declared sidearms both changed CE's drop behaviour for anyone who wanted sidearm ammo
 and forced ammo demand on anyone who wanted ad-hoc for its real purpose.
 
+**What this does not enforce.** Simple Sidearms has settings limiting how many sidearms a
+pawn may carry and how heavy each may be relative to them. Those govern what a pawn picks up
+*on their own*; a loadout row is an explicit order, so a declared weapon is claimed
+regardless. Weapons the pawn cannot use at all — bonded or biocoded to someone else, banned
+by an ideoligion role, or any weapon on a pawn who cannot do violence — are still skipped.
+
 ## Building
 
 Same pattern as the compat patch: `dotnet build Source/CESidearmsSupply/CESidearmsSupply.csproj -c Release`.

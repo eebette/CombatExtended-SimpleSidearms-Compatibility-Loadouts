@@ -21,7 +21,7 @@ namespace CESupplyTestStaging
     ///   cost — microseconds per reconcile, with the module's patches active and again with
     ///          them removed, in one process so the save and JIT state match
     ///   rate — how often CE actually calls it per colonist, counted over a live sample
-    ///          rather than derived from CE's 1800-tick cooldown
+    ///          rather than derived from CE's own throttle cooldown
     ///
     /// Combat Extended benchmarks inside RimWorld rather than in a desktop harness.
     /// </summary>

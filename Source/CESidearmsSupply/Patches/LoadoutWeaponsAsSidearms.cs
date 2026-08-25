@@ -132,31 +132,44 @@ namespace CESidearmsSupply.Patches
                 {
                     continue;
                 }
-                ThingDefStuffDefPair pair = weapon.toThingDefStuffDefPair();
-                if (IsLegalSidearm(pair, pawn))
+                if (IsLegalSidearm(weapon, pawn))
                 {
-                    target.Add(pair);
+                    target.Add(weapon.toThingDefStuffDefPair());
                 }
             }
             return target;
         }
 
         /// <summary>
-        /// SS's own rules about what may be a sidearm — its whitelist and per-weapon mass
-        /// limit, plus the pacifist rule — and nothing about capacity.
+        /// Whether this pawn may hold this weapon as a sidearm at all.
         ///
-        /// Deliberately NOT CanPickupSidearmType: that asks whether there is room for one
-        /// MORE of these, and every weapon reaching here is already in the pawn's hands, so
-        /// its own mass and bulk are already counted against them. Asking it would refuse
-        /// every weapon on exactly the loaded pawns this feature exists for.
+        /// Composed from vanilla's own eligibility and Simple Sidearms' public type check.
+        /// Deliberately NOT CanPickupSidearmType: that answers "is there room for one MORE
+        /// of these", and every weapon reaching here is already in the pawn's hands, so its
+        /// mass and bulk are already counted against them — it would refuse every weapon on
+        /// exactly the loaded pawns this feature exists for.
+        ///
+        /// SS's slot-count and relative-mass limits are not enforced here. Those govern what
+        /// a pawn picks up on their own; a loadout row is an explicit order, and this module
+        /// treats it as outranking them. That is a decision, not an oversight — see README.
         /// </summary>
-        private static bool IsLegalSidearm(ThingDefStuffDefPair pair, Pawn pawn)
+        private static bool IsLegalSidearm(ThingWithComps weapon, Pawn pawn)
         {
-            if ((pawn.CombinedDisabledWorkTags & WorkTags.Violent) != WorkTags.None && !pair.isTool())
+            // Vanilla: bonded and biocoded weapons belonging to someone else, and ideology
+            // role bans. Nothing upstream of this module checked those, so a pawn could be
+            // given another colonist's persona weapon to switch to.
+            if (!EquipmentUtility.CanEquip(weapon, pawn, out string _))
             {
                 return false;
             }
-            return StatCalculator.isValidSidearm(pair, out string _);
+            // A pawn who cannot do violence is given nothing to switch to. SS is more
+            // permissive — it allows tools — and being narrower is this module's own call:
+            // a claim that will never be drawn only costs the pawn bulk.
+            if (pawn.WorkTagIsDisabled(WorkTags.Violent))
+            {
+                return false;
+            }
+            return StatCalculator.isValidSidearm(weapon.toThingDefStuffDefPair(), out string _);
         }
 
         /// <summary>
