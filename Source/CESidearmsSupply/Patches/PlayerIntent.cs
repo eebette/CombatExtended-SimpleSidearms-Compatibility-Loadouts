@@ -113,7 +113,10 @@ namespace CESidearmsSupply.Patches
             {
                 return;
             }
-            rec.dontEquip.Add(weaponMemory.thing);
+            if (!rec.dontEquip.Contains(weaponMemory))
+            {
+                rec.dontEquip.Add(weaponMemory);
+            }
             // Pair-level, matching how the claim was recorded: a different material of the
             // same def may be the player's own and is not ours to disown.
             rec.claimed.RemoveAll(p => p == weaponMemory);
@@ -134,7 +137,9 @@ namespace CESidearmsSupply.Patches
             {
                 return;
             }
-            PlayerIntent.RecordFor(__instance)?.dontEquip.Remove(weapon.def);
+            // Symmetric with the forget above: putting this exact weapon back withdraws the
+            // exclusion on it, and leaves any other material of the same def alone.
+            PlayerIntent.RecordFor(__instance)?.dontEquip.Remove(new ThingDefStuffDefPair(weapon.def, weapon.Stuff));
         }
     }
 

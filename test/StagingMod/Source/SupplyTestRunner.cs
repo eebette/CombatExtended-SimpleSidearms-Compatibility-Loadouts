@@ -392,6 +392,8 @@ namespace CESupplyTestStaging
                 loadout._slots.Insert(0, slot);
             }
 
+            var beforeDelete = new HashSet<string>();
+
             var phases = new List<Phase>();
 
             phases.Add(new Phase
@@ -701,7 +703,7 @@ namespace CESupplyTestStaging
                     C("recorded-as-player-intent", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Contains(pistol);
+                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         return (excluded, $"recorded as do-not-equip={excluded}");
                     }),
                     C("still-declared-so-ce-keeps-hauling-it", () =>
@@ -735,7 +737,7 @@ namespace CESupplyTestStaging
                     C("suppression-cleared", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Contains(pistol);
+                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == pistol);
                         return (!excluded && claimed, $"dontEquip={excluded} claimed={claimed}");
                     }),
@@ -774,7 +776,7 @@ namespace CESupplyTestStaging
                     N("sniper-never-recorded-as-player-forgotten", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Contains(sniper);
+                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == sniper);
                         return (!excluded, $"sniper in dontEquip={excluded}");
                     }),
                     C("sniper-reclaimed", () =>
@@ -873,37 +875,6 @@ namespace CESupplyTestStaging
                 }
             });
 
-            // #4. CE reassigns every pawn of a deleted loadout to the default one by writing
-            // its dictionary directly, and deleting a loadout is an unconfirmed float-menu
-            // click. Reading that as "declares nothing" wiped every claimed sidearm at once.
-            // Last, because it takes the loadout away.
-            phases.Add(new Phase
-            {
-                label = "deleting-the-loadout-does-not-wipe-remembered-sidearms",
-                deadlineTicks = 6000,
-                minTicks = 600,
-                mutate = () =>
-                {
-                    LoadoutManager.RemoveLoadout(loadout);
-                    ForceReconcile(dockie);
-                    ForceReconcile(dockie);
-                },
-                checks =
-                {
-                    C("precondition-pawn-is-on-the-default-loadout", () =>
-                    {
-                        Loadout now = dockie.GetLoadout();
-                        return (now == null || now.defaultLoadout, $"loadout={now?.label ?? "null"}");
-                    }),
-                    N("memories-survive", () =>
-                    {
-                        int count = Mem(dockie).RememberedWeapons.Count;
-                        return (count > 0, $"remembered={count}");
-                    }),
-                }
-            });
-
-
             // The regression for the defect that made the previous design inert: right-clicking
             // a CARRIED weapon in the sidearms gizmo does not reach ForgetSidearmMemory
             // directly — SS routes it through DropSidearm -> InformOfDroppedSidearm, the same
@@ -940,7 +911,7 @@ namespace CESupplyTestStaging
                     C("recorded-as-do-not-equip", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Contains(shotgun);
+                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == shotgun);
                         return (excluded, $"shotgun in dontEquip={excluded}");
                     }),
                     N("never-re-remembered", () =>
@@ -955,6 +926,45 @@ namespace CESupplyTestStaging
                     }),
                 }
             });
+
+            // #4. CE reassigns every pawn of a deleted loadout to the default one by writing
+            // its dictionary directly, and deleting a loadout is an unconfirmed float-menu
+            // click. Reading that as "declares nothing" wiped every claimed sidearm at once.
+            // Last, because it takes the loadout away.
+            phases.Add(new Phase
+            {
+                label = "deleting-the-loadout-does-not-wipe-remembered-sidearms",
+                deadlineTicks = 6000,
+                minTicks = 600,
+                mutate = () =>
+                {
+                    beforeDelete = Mem(dockie).RememberedWeapons.Select(p => p.thing.defName).ToHashSet();
+                    LoadoutManager.RemoveLoadout(loadout);
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("precondition-pawn-is-on-the-default-loadout", () =>
+                    {
+                        Loadout now = dockie.GetLoadout();
+                        return (now == null || now.defaultLoadout, $"loadout={now?.label ?? "null"}");
+                    }),
+                    N("every-remembered-weapon-survives", () =>
+                    {
+                        // A count cannot fail here: a forced pair and a hand-added memory
+                        // both survive the wipe this phase is named for. Assert identity.
+                        var now = Mem(dockie).RememberedWeapons.Select(p => p.thing.defName).ToHashSet();
+                        var lost = beforeDelete.Where(d => !now.Contains(d)).ToList();
+                        return (lost.Count == 0,
+                                lost.Count == 0
+                                    ? $"all {beforeDelete.Count} still remembered"
+                                    : "LOST: " + string.Join(",", lost));
+                    }),
+                }
+            });
+
+
 
             return phases;
         }

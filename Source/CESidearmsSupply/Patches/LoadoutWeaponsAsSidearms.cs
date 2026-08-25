@@ -137,7 +137,8 @@ namespace CESidearmsSupply.Patches
             var target = new HashSet<ThingDefStuffDefPair>();
             foreach (ThingWithComps weapon in pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true))
             {
-                if (weapon?.def == null || !declared.Contains(weapon.def) || rec.dontEquip.Contains(weapon.def))
+                if (weapon?.def == null || !declared.Contains(weapon.def)
+                    || rec.dontEquip.Contains(weapon.toThingDefStuffDefPair()))
                 {
                     continue;
                 }

@@ -29,15 +29,18 @@ namespace CESidearmsSupply
         public List<ThingDefStuffDefPair> claimed = new List<ThingDefStuffDefPair>();
 
         /// <summary>
-        /// Weapon defs the player took out of the sidearm list by hand — "carry it, do not
+        /// Weapons the player took out of the sidearm list by hand — "carry it, do not
         /// wield it", which removing the loadout row cannot say because that would stop the
         /// pawn carrying it at all.
+        ///
+        /// Pairs, not defs, matching how a claim is recorded: forgetting the steel knife is
+        /// not a statement about the plasteel one, which may well be the player's own.
         ///
         /// The one piece of state here that cannot be recovered if it is lost. Simple
         /// Sidearms stores no provenance, so nothing distinguishes a weapon the player
         /// removed from one it never held.
         /// </summary>
-        public HashSet<ThingDef> dontEquip = new HashSet<ThingDef>();
+        public List<ThingDefStuffDefPair> dontEquip = new List<ThingDefStuffDefPair>();
 
         /// <summary>
         /// The player cleared this role by hand. SS persists a flag for "deliberately no
@@ -75,16 +78,16 @@ namespace CESidearmsSupply
             // the pawn's, sharing a namespace with every other comp on it. Prefixed so a
             // field called "claimed" on someone else's comp cannot resolve to ours.
             Scribe_Collections.Look(ref claimed, "ceSupply_claimed", LookMode.Deep);
-            Scribe_Collections.Look(ref dontEquip, "ceSupply_dontEquip", LookMode.Def);
+            Scribe_Collections.Look(ref dontEquip, "ceSupply_dontEquip", LookMode.Deep);
             Scribe_Values.Look(ref rangedRoleVetoed, "ceSupply_rangedRoleVetoed", false);
             Scribe_Values.Look(ref meleeRoleVetoed, "ceSupply_meleeRoleVetoed", false);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 claimed ??= new List<ThingDefStuffDefPair>();
-                dontEquip ??= new HashSet<ThingDef>();
+                dontEquip ??= new List<ThingDefStuffDefPair>();
                 // Scribe leaves an entry behind for every def that no longer resolves.
                 claimed.RemoveAll(p => p.thing == null);
-                dontEquip.RemoveWhere(d => d == null);
+                dontEquip.RemoveAll(p => p.thing == null);
             }
         }
 
