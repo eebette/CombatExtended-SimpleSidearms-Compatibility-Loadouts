@@ -158,6 +158,8 @@ namespace CESupplyTestStaging
         }
 
         private List<Phase> phases;
+        private int isolatedPhase = -1;
+        private int totalPhaseCount;
         private int phaseIndex = -1;
         private int phaseStartTick;
         private string scenario;
@@ -175,11 +177,31 @@ namespace CESupplyTestStaging
             {
                 return;
             }
+            // "supply1:7" runs phase 7 and nothing else, in its own process against a freshly
+            // loaded save. The sequenced run proves the phases work against accumulated state;
+            // this proves each one stands on its own, which arrange alone cannot demonstrate —
+            // a phase can arrange everything it remembered to and still lean on something it
+            // did not.
+            int colon = scenario.IndexOf(':');
+            if (colon > 0 && int.TryParse(scenario.Substring(colon + 1), out int only))
+            {
+                isolatedPhase = only;
+                scenario = scenario.Substring(0, colon);
+            }
             LongEventHandler.ExecuteWhenFinished(() =>
             {
                 try
                 {
                     phases = BuildScenario(scenario);
+                    totalPhaseCount = phases.Count;
+                    if (isolatedPhase >= 0)
+                    {
+                        phases = isolatedPhase < totalPhaseCount
+                            ? new List<Phase> { phases[isolatedPhase] }
+                            : new List<Phase>();
+                        Log.Message($"[SupplyTest] Isolated run: phase {isolatedPhase} of {totalPhaseCount}"
+                                    + (phases.Count == 0 ? " — out of range." : $" ('{phases[0].label}')."));
+                    }
                 }
                 catch (Exception e)
                 {
@@ -212,6 +234,11 @@ namespace CESupplyTestStaging
                 return;
             }
 
+            if (phases.Count == 0)
+            {
+                Finish();
+                return;
+            }
             Phase phase = phases[phaseIndex];
 
             // Any unaccounted-for error or warning, from this mod or from CE or SS, fails the
@@ -345,6 +372,11 @@ namespace CESupplyTestStaging
             var sb = new StringBuilder();
             sb.Append("{\n");
             sb.Append($"  \"scenario\": \"{scenario}\",\n");
+            sb.Append($"  \"phaseCount\": {totalPhaseCount},\n");
+            if (isolatedPhase >= 0)
+            {
+                sb.Append($"  \"isolatedPhase\": {isolatedPhase},\n");
+            }
             bool overall = crashed == null && phases != null && phases.All(p => !p.failed && !p.invalid);
             sb.Append($"  \"passed\": {(overall ? "true" : "false")},\n");
             if (crashed != null)
@@ -385,7 +417,8 @@ namespace CESupplyTestStaging
                 }
             }
             sb.Append("  ]\n}\n");
-            string path = Path.Combine(GenFilePaths.SaveDataFolderPath, $"test-results-{scenario}.json");
+            string suffix = isolatedPhase >= 0 ? $"-iso-{isolatedPhase:D2}" : "";
+            string path = Path.Combine(GenFilePaths.SaveDataFolderPath, $"test-results-{scenario}{suffix}.json");
             File.WriteAllText(path, sb.ToString());
             Log.Message($"[SupplyTest] Results written to {path}");
         }
@@ -464,6 +497,62 @@ namespace CESupplyTestStaging
         }
 
         /// <summary>
+        /// Puts the pawn into a known state so a phase inherits nothing from the ones before
+        /// it: the loadout holds exactly these rows in this order, Simple Sidearms remembers
+        /// exactly the carried weapons among them, and every piece of player intent — forced
+        /// weapon, unarmed flags, role vetoes, exclusions — is cleared.
+        ///
+        /// This is what lets the same phase definition run inside the sequence and on its own
+        /// in a fresh process. A phase that arranges its own world does not care which of
+        /// those it is in.
+        /// </summary>
+        private static void Baseline(Pawn pawn, Loadout loadout, params ThingDef[] rows)
+        {
+            CompSidearmMemory memory = Mem(pawn);
+            var rec = CESidearmsSupply.CompLoadoutSidearms.For(pawn);
+
+            // Player intent first: SS's role setters clear forced state as a side effect, so
+            // clearing intent after seeding memory would undo part of the seeding.
+            memory.UnsetForcedWeapon(drafted: false);
+            memory.UnsetForcedWeapon(drafted: true);
+            memory.ForcedUnarmed = false;
+            memory.PreferredUnarmed = false;
+            memory.UnsetRangedWeaponDefault();
+            memory.UnsetMeleeWeaponPreference();
+            if (rec != null)
+            {
+                rec.dontEquip.Clear();
+                rec.claimed.Clear();
+                rec.rangedRoleVetoed = false;
+                rec.meleeRoleVetoed = false;
+            }
+
+            // Memory: drop everything, then re-seed from what the pawn actually carries among
+            // the declared rows. Going through ForgetSidearmMemory rather than clearing the
+            // list keeps SS's own bookkeeping consistent.
+            foreach (var pair in memory.RememberedWeapons.ToList())
+            {
+                memory.ForgetSidearmMemory(pair);
+            }
+
+            loadout._slots.Clear();
+            foreach (ThingDef def in rows)
+            {
+                loadout.AddSlot(new LoadoutSlot(def, 1));
+            }
+
+            // The vetoes above were written through the same methods the intent hooks watch,
+            // so clear the record once more after the fact.
+            if (rec != null)
+            {
+                rec.dontEquip.Clear();
+                rec.rangedRoleVetoed = false;
+                rec.meleeRoleVetoed = false;
+            }
+            ForceReconcile(pawn);
+        }
+
+        /// <summary>
         /// Something that must be true for the phase to mean anything. If it never holds the
         /// phase reports INVALID — it did not test what it claims to, which is a different
         /// failure from the code being wrong and should not be reported as either a pass or
@@ -527,6 +616,7 @@ namespace CESupplyTestStaging
             }
 
             var beforeDelete = new HashSet<string>();
+            bool pistolWasReleased = false;
 
             var phases = new List<Phase>();
 
@@ -607,6 +697,7 @@ namespace CESupplyTestStaging
             {
                 label = "reorder-shotgun-top",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     // restore the kit the fetch phase stripped, then reorder
@@ -637,6 +728,7 @@ namespace CESupplyTestStaging
                 // to another DECLARED weapon does not stick — reorder the loadout instead.
                 label = "declared-role-override-yields-to-loadout",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     MoveTop(sniper);
@@ -659,6 +751,7 @@ namespace CESupplyTestStaging
                 // must not touch a forced weapon: SetRangedWeaponTypeAsDefault would clear it.
                 label = "forced-weapon-is-never-touched",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     Mem(dockie).SetWeaponAsForced(new ThingDefStuffDefPair(pistol, null), false);
@@ -680,6 +773,7 @@ namespace CESupplyTestStaging
             {
                 label = "template-forget",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () => { loadout.RemoveSlot(SlotOf(shotgun)); ForceReconcile(dockie); },
                 checks =
                 {
@@ -695,6 +789,7 @@ namespace CESupplyTestStaging
             {
                 label = "manual-memory-protected",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     // Re-remember shotgun MANUALLY (not template-tracked), then churn the
@@ -703,6 +798,9 @@ namespace CESupplyTestStaging
                     LoadoutSlot pistolSlot = SlotOf(pistol);
                     loadout.RemoveSlot(pistolSlot);
                     ForceReconcile(dockie);
+                    // Sampled here, between the removal and the re-add: the end state alone
+                    // cannot tell a correct round trip from the projection doing nothing.
+                    pistolWasReleased = !Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
                     loadout.AddSlot(new LoadoutSlot(pistol, 1));
                     ForceReconcile(dockie);
                 },
@@ -712,6 +810,14 @@ namespace CESupplyTestStaging
                     {
                         bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
                         return (present, "shotgun remembered=" + present);
+                    }),
+                    C("pistol-was-actually-released-first", () =>
+                    {
+                        // Reading the end state cannot tell "correctly re-claimed" from
+                        // "never released". The mutate records whether the memory was gone
+                        // between the removal and the re-add; without that this check passes
+                        // even if ForgetUndeclared does nothing at all.
+                        return (pistolWasReleased, $"released between remove and re-add={pistolWasReleased}");
                     }),
                     C("pistol-re-remembered", () =>
                     {
@@ -725,6 +831,7 @@ namespace CESupplyTestStaging
             {
                 label = "preexisting-memory-claimed-by-loadout",
                 deadlineTicks = 8000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     // The common real-world ordering: the pawn ALREADY carries and
@@ -784,6 +891,7 @@ namespace CESupplyTestStaging
             {
                 label = "player-pick-heads-the-list",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     Mem(dockie).RememberedWeapons.RemoveAll(p => p.thing == revolver);
@@ -807,6 +915,7 @@ namespace CESupplyTestStaging
             {
                 label = "loadout-takes-over-when-pick-is-gone",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     dockie.inventory.innerContainer.Remove(playerPick);
@@ -819,7 +928,25 @@ namespace CESupplyTestStaging
                         ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
                         return (def == sniper, $"default={def?.defName ?? "none"} want={sniper.defName}");
                     }),
-                    C("nothing-shelved-to-restore", () =>
+                    C("claimed-is-exactly-declared-and-carried", () =>
+                    {
+                        // The old form asserted rec.claimed held no HeavySMG — which no code
+                        // path can produce, so it passed with the feature deleted. The real
+                        // invariant is that claimed matches what the loadout declares and the
+                        // pawn holds, nothing more and nothing less.
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Select(w => w.def).ToHashSet();
+                        var declaredNow = loadout.Slots.Where(sl => sl.thingDef != null && sl.thingDef.IsWeapon)
+                            .Select(sl => sl.thingDef).ToHashSet();
+                        var want = declaredNow.Where(d => carried.Contains(d)).ToHashSet();
+                        var got = rec == null ? new HashSet<ThingDef>() : rec.claimed.Select(p => p.thing).ToHashSet();
+                        bool ok = want.SetEquals(got);
+                        return (ok, ok ? $"claimed == declared-and-carried ({got.Count})"
+                                       : $"want=[{string.Join(",", want.Select(d => d.defName))}] "
+                                         + $"got=[{string.Join(",", got.Select(d => d.defName))}]");
+                    }),
+                    C("undeclared-pick-never-claimed", () =>
                     {
                         // Deliberately not remembered: the player expressed the choice by
                         // EQUIPPING. Simple Sidearms' retrieval brings a weapon back to the
@@ -843,6 +970,7 @@ namespace CESupplyTestStaging
             {
                 label = "gizmo-forget-of-declared-weapon-sticks",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () => PlayerForgets(dockie, pistol),
                 checks =
                 {
@@ -857,12 +985,16 @@ namespace CESupplyTestStaging
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         return (excluded, $"recorded as do-not-equip={excluded}");
                     }),
-                    C("still-declared-so-ce-keeps-hauling-it", () =>
+                    C("ce-still-hauls-it", () =>
                     {
-                        // Suppression must not touch the loadout: the row is still there, so CE
-                        // still carries the weapon. That is the whole point of the distinction.
+                        // The old form asserted the row still existed — but this module
+                        // contains no code that removes loadout slots, so it passed with the
+                        // feature deleted. What matters is the consequence: excluded from the
+                        // sidearm list, still carried because CE's row stands.
                         bool declared = loadout.Slots.Any(sl => sl.thingDef == pistol);
-                        return (declared, $"pistol still in loadout={declared}");
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == pistol);
+                        return (declared && carried, $"row={declared} carried={carried}");
                     }),
                 }
             });
@@ -871,6 +1003,7 @@ namespace CESupplyTestStaging
             {
                 label = "re-remembering-resumes-management",
                 deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     ThingWithComps carriedPistol = dockie.inventory.innerContainer.OfType<ThingWithComps>()
@@ -906,6 +1039,7 @@ namespace CESupplyTestStaging
                 label = "equipping-something-else-does-not-suppress-a-declared-weapon",
                 deadlineTicks = 6000,
                 minTicks = 300,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     ThingWithComps outgoing = dockie.equipment?.Primary;
@@ -945,6 +1079,7 @@ namespace CESupplyTestStaging
                 label = "forced-weapon-survives-its-row-leaving-the-loadout",
                 deadlineTicks = 6000,
                 minTicks = 300,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     var pair = Mem(dockie).RememberedWeapons.FirstOrDefault(p => p.thing == gladius);
@@ -978,6 +1113,7 @@ namespace CESupplyTestStaging
                 label = "declared-but-uncarried-weapon-is-not-remembered-with-a-guessed-stuff",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     ThingDef knife = D("MeleeWeapon_Knife");
@@ -1010,6 +1146,7 @@ namespace CESupplyTestStaging
                 label = "a-hand-cleared-ranged-role-is-not-restored",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     PlayerClearsRangedRole(dockie);
@@ -1036,6 +1173,7 @@ namespace CESupplyTestStaging
                 label = "forgetting-a-carried-weapon-in-the-gizmo-sticks",
                 deadlineTicks = 12000,
                 minTicks = 900,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     ThingWithComps carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
@@ -1115,6 +1253,7 @@ namespace CESupplyTestStaging
                 label = "deleting-the-loadout-does-not-wipe-remembered-sidearms",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     beforeDelete = Mem(dockie).RememberedWeapons.Select(p => p.thing.defName).ToHashSet();

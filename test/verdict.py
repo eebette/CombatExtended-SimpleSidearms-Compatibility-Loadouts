@@ -88,8 +88,45 @@ def main(path):
     return 0 if ok else 1
 
 
+def merge(paths):
+    """One result file per phase, from an isolated sweep. A phase missing entirely is a
+    failure — it means that process never wrote results."""
+    merged = {"scenario": "", "passed": True, "phases": []}
+    for path in sorted(paths):
+        try:
+            with open(path) as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"== UNREADABLE: {path}: {exc}", file=sys.stderr)
+            return 1
+        merged["scenario"] = data.get("scenario", "?") + " (isolated)"
+        if data.get("crashed"):
+            merged["crashed"] = data["crashed"]
+        merged["phases"].extend(data.get("phases") or [])
+
+    expected = None
+    for path in sorted(paths):
+        with open(path) as fh:
+            expected = json.load(fh).get("phaseCount")
+        break
+    if expected is not None and len(merged["phases"]) != expected:
+        print(f"== ISOLATED SWEEP INCOMPLETE: {len(merged['phases'])} of {expected} phases "
+              "produced results ==", file=sys.stderr)
+        merged["passed"] = False
+
+    merged["passed"] = merged["passed"] and all(
+        p.get("passed") and not p.get("invalid") for p in merged["phases"]
+    )
+    tmp = "/tmp/verdict-merged.json"
+    with open(tmp, "w") as fh:
+        json.dump(merged, fh)
+    return main(tmp)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: verdict.py <test-results-*.json>", file=sys.stderr)
-        sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+    if len(sys.argv) == 2:
+        sys.exit(main(sys.argv[1]))
+    if len(sys.argv) > 2 and sys.argv[1] == "--merge":
+        sys.exit(merge(sys.argv[2:]))
+    print("usage: verdict.py <results.json> | verdict.py --merge <results-iso-*.json>", file=sys.stderr)
+    sys.exit(2)
