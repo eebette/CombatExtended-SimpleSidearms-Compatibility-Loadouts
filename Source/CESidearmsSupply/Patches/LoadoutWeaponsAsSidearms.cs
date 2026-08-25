@@ -50,18 +50,18 @@ namespace CESidearmsSupply.Patches
         [HarmonyPrefix]
         public static void Prefix(Pawn pawn)
         {
-            // Checked before the setting, because this is the case where the player turned
-            // the setting OFF with no save loaded and there was nothing to release yet.
-            if (SupplyMod.Settings.releasePending)
-            {
-                SupplyMod.Release();
-            }
-            if (!SupplyMod.Settings.loadoutWeaponsAsSidearms)
-            {
-                return;
-            }
             try
             {
+                // Before the setting check: this is the case where the player turned the
+                // feature OFF with no save loaded, so there was nothing to release then.
+                if (SupplyMod.Settings.releasePending)
+                {
+                    SupplyMod.Release();
+                }
+                if (!SupplyMod.Settings.loadoutWeaponsAsSidearms)
+                {
+                    return;
+                }
                 Reconcile(pawn);
             }
             catch (Exception e)
@@ -74,6 +74,15 @@ namespace CESidearmsSupply.Patches
         public static void Reconcile(Pawn pawn)
         {
             if (pawn == null || !pawn.IsColonist || pawn.Dead)
+            {
+                return;
+            }
+            // A gizmo click that drops or swaps a weapon ends the pawn's job, and
+            // Pawn_JobTracker.EndCurrentJob restarts the think tree synchronously — so CE's
+            // job giver, and this prefix, can run while the player-intent scope is still
+            // open. Everything below would then be read back as the player's doing.
+            // Skipping the pass costs nothing: this recomputes from scratch every time.
+            if (PlayerIntent.PlayerIsDriving)
             {
                 return;
             }
@@ -185,14 +194,18 @@ namespace CESidearmsSupply.Patches
             // the force as a side effect with nothing to tell the player it happened. Keep
             // claiming it so it is released once they unforce it.
             var stranded = new List<ThingDefStuffDefPair>();
-            foreach (ThingDefStuffDefPair gone in rec.claimed.Distinct().Where(p => !target.Contains(p)))
+            // Materialised: the hooks on SS's memory methods write to rec.claimed, so a lazy
+            // enumeration of it here can be invalidated mid-loop.
+            foreach (ThingDefStuffDefPair gone in rec.claimed.Distinct().Where(p => !target.Contains(p)).ToList())
             {
                 if (gone == forced || gone == forcedDrafted)
                 {
                     stranded.Add(gone);
                     continue;
                 }
-                while (memory.RememberedWeapons.Contains(gone))
+                // One claim in, one claim out. SS allows duplicate memories and treats them
+                // as real, so draining to exhaustion would delete copies the player added.
+                if (memory.RememberedWeapons.Contains(gone))
                 {
                     memory.ForgetSidearmMemory(gone);
                 }

@@ -54,13 +54,30 @@ namespace CESidearmsSupply
             return pawn?.TryGetComp<CompLoadoutSidearms>();
         }
 
+        /// <summary>
+        /// The def patch attaches this to every pawn ThingDef, which by inheritance means
+        /// animals, insects and mechanoids too. Simple Sidearms attaches its own comp the
+        /// same way and then removes it here; do the same, or every muffalo carries this.
+        /// </summary>
+        public override void Initialize(CompProperties props)
+        {
+            base.Initialize(props);
+            if (!(parent is Pawn pawn) || !(pawn.RaceProps?.Humanlike ?? false))
+            {
+                parent.AllComps.Remove(this);
+            }
+        }
+
         public override void PostExposeData()
         {
             base.PostExposeData();
-            Scribe_Collections.Look(ref claimed, "claimed", LookMode.Deep);
-            Scribe_Collections.Look(ref dontEquip, "dontEquip", LookMode.Def);
-            Scribe_Values.Look(ref rangedRoleVetoed, "rangedRoleVetoed", false);
-            Scribe_Values.Look(ref meleeRoleVetoed, "meleeRoleVetoed", false);
+            // A ThingComp has no node of its own — these are written as direct children of
+            // the pawn's, sharing a namespace with every other comp on it. Prefixed so a
+            // field called "claimed" on someone else's comp cannot resolve to ours.
+            Scribe_Collections.Look(ref claimed, "ceSupply_claimed", LookMode.Deep);
+            Scribe_Collections.Look(ref dontEquip, "ceSupply_dontEquip", LookMode.Def);
+            Scribe_Values.Look(ref rangedRoleVetoed, "ceSupply_rangedRoleVetoed", false);
+            Scribe_Values.Look(ref meleeRoleVetoed, "ceSupply_meleeRoleVetoed", false);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 claimed ??= new List<ThingDefStuffDefPair>();
@@ -71,22 +88,36 @@ namespace CESidearmsSupply
             }
         }
 
-        /// <summary>Forget every pair this projection wrote, and drop the record.</summary>
-        public int Release(CompSidearmMemory memory)
+        /// <summary>
+        /// Forget every pair this projection wrote, and drop the record.
+        ///
+        /// Returns -1 when the pawn's sidearm memory cannot be resolved — Simple Sidearms
+        /// populates it on spawn, so an unspawned pawn in a caravan has none. Clearing the
+        /// record then would strand exactly the memories this is meant to release.
+        /// </summary>
+        public int Release(CompSidearmMemory memory, ThingDefStuffDefPair? forced,
+                           ThingDefStuffDefPair? forcedDrafted)
         {
-            int released = 0;
-            if (memory?.RememberedWeapons != null)
+            if (memory?.RememberedWeapons == null)
             {
-                foreach (ThingDefStuffDefPair pair in claimed.Distinct())
+                return -1;
+            }
+            int released = 0;
+            foreach (ThingDefStuffDefPair pair in claimed.Distinct().ToList())
+            {
+                // Same courtesy the reconcile pays: forgetting the last copy of a forced
+                // weapon clears the force as a side effect, and that is the player's.
+                if (pair == forced || pair == forcedDrafted)
                 {
-                    while (memory.RememberedWeapons.Contains(pair))
-                    {
-                        memory.ForgetSidearmMemory(pair);
-                        released++;
-                    }
+                    continue;
+                }
+                if (memory.RememberedWeapons.Contains(pair))
+                {
+                    memory.ForgetSidearmMemory(pair);
+                    released++;
                 }
             }
-            claimed.Clear();
+            claimed.RemoveAll(p => p != forced && p != forcedDrafted);
             return released;
         }
     }

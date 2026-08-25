@@ -59,6 +59,13 @@ namespace CESidearmsSupply
             {
                 Release();
             }
+            else if (!was && Settings.loadoutWeaponsAsSidearms && Settings.releasePending)
+            {
+                // Changed their mind before any save was loaded. Without this the deferred
+                // release fires anyway, on an enabled feature, and wipes their exclusions.
+                Settings.releasePending = false;
+                Settings.Write();
+            }
 
             listing.Gap();
             bool inGame = Current.Game != null;
@@ -97,20 +104,35 @@ namespace CESidearmsSupply
                 return false;
             }
             int released = 0;
+            int deferred = 0;
             foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive_Colonists.ToList())
             {
                 CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
-                if (rec != null)
+                if (rec == null)
                 {
-                    released += rec.Release(CompSidearmMemory.GetMemoryCompForPawn(pawn));
-                    rec.dontEquip.Clear();
-                    rec.rangedRoleVetoed = false;
-                    rec.meleeRoleVetoed = false;
+                    continue;
+                }
+                CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
+                int n = rec.Release(memory, memory?.ForcedWeapon, memory?.ForcedWeaponWhileDrafted);
+                if (n < 0)
+                {
+                    deferred++; // unspawned; its memory comp is not resolvable yet
+                }
+                else
+                {
+                    released += n;
                 }
             }
-            Settings.releasePending = false;
-            Settings.Write();
-            Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s).",
+            // dontEquip and the role vetoes are the player's, not this projection's, and the
+            // button's own text promises not to touch what the loadout does not list. They
+            // survive a release.
+            if (deferred == 0)
+            {
+                Settings.releasePending = false;
+                Settings.Write();
+            }
+            Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s)."
+                             + (deferred > 0 ? $" {deferred} pawn(s) are away and will be released when they return." : ""),
                              MessageTypeDefOf.TaskCompletion, historical: false);
             return true;
         }

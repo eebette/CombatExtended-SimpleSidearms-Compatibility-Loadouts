@@ -1,5 +1,6 @@
 using System;
 using HarmonyLib;
+using UnityEngine;
 using SimpleSidearms.rimworld;
 using Verse;
 
@@ -46,16 +47,22 @@ namespace CESidearmsSupply.Patches
             return pawn != null && pawn.IsColonist ? CompLoadoutSidearms.For(pawn) : null;
         }
 
-        /// <summary>Shared by every patch here: no target, no feature, named error, no throw.</summary>
-        internal static bool Require(string method, Type[] args = null)
+        /// <summary>
+        /// Shared by every patch here: no target, no feature, named error, no throw.
+        ///
+        /// The parameter types are mandatory. AccessTools.Method with a null parameter list
+        /// rethrows on an ambiguous match, which would abort PatchAll for the whole assembly
+        /// and take the loadout projection down with it — the failure these guards exist to
+        /// prevent.
+        /// </summary>
+        internal static bool Require(string method, Type[] args, string consequence)
         {
             if (AccessTools.Method(typeof(CompSidearmMemory), method, args) != null)
             {
                 return true;
             }
-            Log.Error($"[Sidearms&Supply] CompSidearmMemory.{method} not found — the sidearm gizmo "
-                      + "will not be read, so taking a loadout weapon out of the list by hand will "
-                      + "not stick. Simple Sidearms probably moved it.");
+            Log.Error($"[Sidearms&Supply] CompSidearmMemory.{method} not found — {consequence} "
+                      + "Simple Sidearms probably moved it.");
             return false;
         }
     }
@@ -69,7 +76,8 @@ namespace CESidearmsSupply.Patches
     {
         public static bool Prepare()
         {
-            if (AccessTools.Method(typeof(Gizmo_SidearmsList), "handleInteraction") != null)
+            if (AccessTools.Method(typeof(Gizmo_SidearmsList), "handleInteraction",
+                                   new[] { typeof(Gizmo_SidearmsList.SidearmsListInteraction), typeof(Event) }) != null)
             {
                 return true;
             }
@@ -90,7 +98,8 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.ForgetSidearmMemory))]
     public static class CompSidearmMemory_ForgetSidearmMemory_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("ForgetSidearmMemory");
+        public static bool Prepare() => PlayerIntent.Require("ForgetSidearmMemory",
+            new[] { typeof(ThingDefStuffDefPair) }, "taking a loadout weapon out of the sidearm list by hand will not stick.");
 
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance, ThingDefStuffDefPair weaponMemory)
@@ -115,7 +124,8 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.InformOfAddedSidearm))]
     public static class CompSidearmMemory_InformOfAddedSidearm_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("InformOfAddedSidearm");
+        public static bool Prepare() => PlayerIntent.Require("InformOfAddedSidearm",
+            new[] { typeof(Thing) }, "putting a weapon back in the sidearm list by hand will not resume management.");
 
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance, Thing weapon)
@@ -131,7 +141,8 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetRangedWeaponDefault))]
     public static class CompSidearmMemory_UnsetRangedWeaponDefault_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("UnsetRangedWeaponDefault");
+        public static bool Prepare() => PlayerIntent.Require("UnsetRangedWeaponDefault",
+            Type.EmptyTypes, "clearing the default ranged weapon by hand will be undone by the next reconcile.");
 
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance)
@@ -156,7 +167,8 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetMeleeWeaponPreference))]
     public static class CompSidearmMemory_UnsetMeleeWeaponPreference_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("UnsetMeleeWeaponPreference");
+        public static bool Prepare() => PlayerIntent.Require("UnsetMeleeWeaponPreference",
+            Type.EmptyTypes, "clearing the preferred melee weapon by hand will be undone by the next reconcile.");
 
         [HarmonyPrefix]
         public static void Prefix(CompSidearmMemory __instance, out bool __state)
@@ -183,7 +195,8 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetRangedWeaponTypeAsDefault))]
     public static class CompSidearmMemory_SetRangedWeaponTypeAsDefault_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("SetRangedWeaponTypeAsDefault");
+        public static bool Prepare() => PlayerIntent.Require("SetRangedWeaponTypeAsDefault",
+            new[] { typeof(ThingDefStuffDefPair) }, "setting the default ranged weapon by hand will not resume loadout management.");
 
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance)
@@ -203,7 +216,8 @@ namespace CESidearmsSupply.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetMeleeWeaponTypeAsPreferred))]
     public static class CompSidearmMemory_SetMeleeWeaponTypeAsPreferred_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("SetMeleeWeaponTypeAsPreferred");
+        public static bool Prepare() => PlayerIntent.Require("SetMeleeWeaponTypeAsPreferred",
+            new[] { typeof(ThingDefStuffDefPair) }, "setting the preferred melee weapon by hand will not resume loadout management.");
 
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance)
