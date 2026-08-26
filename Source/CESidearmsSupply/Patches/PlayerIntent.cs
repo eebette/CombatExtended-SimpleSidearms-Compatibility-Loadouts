@@ -404,13 +404,12 @@ namespace CESidearmsSupply.Patches
     /// items live in pawn inventories — so the inventory-side veto refused a player
     /// dragging an excluded weapon onto a pawn, with no way to withdraw the exclusion
     /// until the caravan landed. Same pair of moves as CE's inventory tab: the veto
-    /// stands down while the player's own gesture runs, and a successful equip
-    /// withdraws the exclusion.
-    ///
-    /// The dragged item is captured in the prefix: the method nulls its field on every
-    /// path. Off the map the SS memory comp is usually unresolvable, so the re-remember
-    /// half is best-effort — the reconcile claims the pair as soon as the pawn spawns
-    /// again, declared and carried.
+    /// stands down while the player's own gesture runs, and the AddEquipment recorder
+    /// (see Pawn_EquipmentTracker_AddEquipment_Patch) withdraws the exclusion when the
+    /// equip actually lands — the equip path here goes through the same vanilla
+    /// primitive. Off the map the SS memory comp is usually unresolvable, so the
+    /// re-remember half is best-effort — the reconcile claims the pair as soon as the
+    /// pawn spawns again, declared and carried.
     /// </summary>
     [HarmonyPatch(typeof(RimWorld.Planet.WITab_Caravan_Gear), "TryEquipDraggedItem",
                   new[] { typeof(Pawn) })]
@@ -430,26 +429,7 @@ namespace CESidearmsSupply.Patches
         }
 
         [HarmonyPrefix]
-        public static void Prefix(Thing ___draggedItem, out Thing __state)
-        {
-            PlayerIntent.EnterChoice();
-            __state = ___draggedItem;
-        }
-
-        [HarmonyPostfix]
-        public static void Postfix(Pawn p, Thing __state)
-        {
-            if (!(__state is ThingWithComps eq) || eq.def == null || p == null
-                || p.equipment?.Primary != eq)
-            {
-                return;
-            }
-            CompLoadoutSidearms rec = CompLoadoutSidearms.For(p);
-            if (rec != null && rec.dontEquip.Remove(new ThingDefStuffDefPair(eq.def, eq.Stuff)))
-            {
-                CompSidearmMemory.GetMemoryCompForPawn(p)?.InformOfAddedPrimary(eq);
-            }
-        }
+        public static void Prefix() => PlayerIntent.EnterChoice();
 
         [HarmonyFinalizer]
         public static void Finalizer() => PlayerIntent.ExitChoice();
@@ -551,10 +531,13 @@ namespace CESidearmsSupply.Patches
     }
 
     /// <summary>
-    /// Clicking that Equip entry clears the exclusion — the same meaning as choosing Equip
-    /// on the map menu. This path is a direct weapon switch, not an equip job, so Simple
-    /// Sidearms' own remember-on-equip hook never runs; calling InformOfAddedPrimary here
-    /// makes the end state identical to the job path: equipped, remembered, role set.
+    /// The click half of the tab path: a scope, not a recorder. The old hook here acted on
+    /// the CLICK — TrySwitchToWeapon returns void and exits silently when the weapon has
+    /// left the container between the menu frame and the click frame, so a failed switch
+    /// still cleared the exclusion and wrote a memory for a weapon never equipped. The
+    /// call chain from here down to Pawn_EquipmentTracker.AddEquipment is synchronous, so
+    /// raising the choice scope around it hands the recording to the AddEquipment
+    /// recorder below, which only ever fires on an equip that actually happened.
     ///
     /// Player-only by construction: SyncedTrySwitchToWeapon's single caller in all of CE is
     /// this tab's menu entry. Machine switches call CompInventory.TrySwitchToWeapon
@@ -577,17 +560,69 @@ namespace CESidearmsSupply.Patches
             return false;
         }
 
-        [HarmonyPostfix]
-        public static void Postfix(CompInventory compInventory, ThingWithComps eq)
+        [HarmonyPrefix]
+        public static void Prefix() => PlayerIntent.EnterChoice();
+
+        [HarmonyFinalizer]
+        public static void Finalizer() => PlayerIntent.ExitChoice();
+    }
+
+    /// <summary>
+    /// The recorder for every player-choice equip surface: the equip EVENT, gated by the
+    /// choice scope. AddEquipment fires exactly when a weapon lands in a pawn's hands, so
+    /// success is implied by construction — a click whose switch silently failed never
+    /// reaches it. The tab and caravan brackets above raise the scope; anything that
+    /// equips inside it is the player's word on both fronts: the exclusion is withdrawn
+    /// and the matching role veto lifted, and the weapon is re-remembered behind Simple
+    /// Sidearms' own duplicate guard (this path is a direct switch, not an equip job, so
+    /// SS's remember-on-equip hook never runs on its own).
+    ///
+    /// Gated on PlayerChoosing, not PlayerIsDriving, deliberately: gizmo clicks also reach
+    /// AddEquipment through SS's own funnel, and the gizmo's recorders already handle
+    /// those — distinct scopes avoid double-recording.
+    /// </summary>
+    [HarmonyPatch(typeof(Pawn_EquipmentTracker), nameof(Pawn_EquipmentTracker.AddEquipment),
+                  new[] { typeof(ThingWithComps) })]
+    public static class Pawn_EquipmentTracker_AddEquipment_Patch
+    {
+        public static bool Prepare()
         {
-            if (eq?.def == null || !(compInventory?.parent is Pawn pawn))
+            if (AccessTools.Method(typeof(Pawn_EquipmentTracker), nameof(Pawn_EquipmentTracker.AddEquipment),
+                    new[] { typeof(ThingWithComps) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] Pawn_EquipmentTracker.AddEquipment not found — "
+                      + "equipping an excluded weapon by hand will not clear its exclusion. "
+                      + "RimWorld probably moved it.");
+            return false;
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(Pawn_EquipmentTracker __instance, ThingWithComps newEq)
+        {
+            if (!PlayerIntent.PlayerChoosing || newEq?.def == null
+                || !(__instance?.pawn is Pawn pawn) || !PlayerIntent.ManagedPawn(pawn))
             {
                 return;
             }
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
-            if (rec != null && rec.dontEquip.Remove(new ThingDefStuffDefPair(eq.def, eq.Stuff)))
+            if (rec == null || !rec.dontEquip.Remove(new ThingDefStuffDefPair(newEq.def, newEq.Stuff)))
             {
-                CompSidearmMemory.GetMemoryCompForPawn(pawn)?.InformOfAddedPrimary(eq);
+                return;
+            }
+            if (newEq.def.IsRangedWeapon)
+            {
+                rec.rangedRoleVetoed = false;
+            }
+            if (newEq.def.IsMeleeWeapon)
+            {
+                rec.meleeRoleVetoed = false;
+            }
+            CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
+            if (memory != null && !memory.RememberedWeapons.Any(p => p == newEq.toThingDefStuffDefPair()))
+            {
+                memory.InformOfAddedPrimary(newEq);
             }
         }
     }

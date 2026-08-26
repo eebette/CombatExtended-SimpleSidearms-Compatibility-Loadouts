@@ -802,6 +802,9 @@ namespace CESupplyTestStaging
             ThingDefStuffDefPair? meleeRoleAtSettle = null;
             bool featureOffHadClaims = false;
             bool forceWithdrewExclusion = false;
+            bool tabSwitchVetoLifted = false;
+            bool failedSwitchKeptExclusion = false;
+            bool failedSwitchNotRemembered = false;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -1967,6 +1970,9 @@ namespace CESupplyTestStaging
                 {
                     Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
                     PlayerForgets(dockie, pistol);
+                    // A hand-cleared role, so the phase also proves the recorder lifts the
+                    // matching veto: a tab equip is the player's word on both fronts.
+                    PlayerClearsRangedRole(dockie);
                 },
                 mutate = () =>
                 {
@@ -1985,6 +1991,8 @@ namespace CESupplyTestStaging
                         // correct behaviour.
                         tabSwitchEquipped = dockie.equipment?.Primary?.def == pistol;
                         tabSwitchRole = Mem(dockie).DefaultRangedWeapon?.thing == pistol;
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        tabSwitchVetoLifted = rec != null && !rec.rangedRoleVetoed;
                     }
                 },
                 checks =
@@ -2012,6 +2020,68 @@ namespace CESupplyTestStaging
                     {
                         bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
                         return (remembered, $"remembered={remembered}");
+                    }),
+                    C("the-role-veto-was-lifted-at-the-click", () =>
+                    {
+                        return (tabSwitchVetoLifted, $"veto lifted={tabSwitchVetoLifted}");
+                    }),
+                }
+            });
+
+            // The half the old hook got wrong: the click action runs a frame after the
+            // menu was built, and the weapon can be gone by then — TrySwitchToWeapon
+            // returns void and exits silently. The old click-time hook still cleared the
+            // exclusion and wrote a memory for a weapon never equipped. The AddEquipment
+            // recorder only fires on an equip that actually happened, so a failed click
+            // changes nothing.
+            phases.Add(new Phase
+            {
+                label = "a-failed-tab-switch-changes-nothing",
+                deadlineTicks = 4000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    ThingWithComps t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == pistol);
+                    var inv = dockie.TryGetComp<CombatExtended.CompInventory>();
+                    if (t != null && inv != null)
+                    {
+                        // The weapon leaves the container between the menu frame and the
+                        // click frame — the race CE's loadout enforcement or a caravan
+                        // pack job produces in play.
+                        dockie.inventory.innerContainer.Remove(t);
+                        AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "SyncedTrySwitchToWeapon")
+                            .Invoke(null, new object[] { inv, t });
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        failedSwitchKeptExclusion = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        failedSwitchNotRemembered = !Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
+                        // Restore the world for the phases after this one.
+                        dockie.inventory.innerContainer.TryAdd(t);
+                        inv.UpdateInventory();
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    P("pistol-starts-excluded-and-carried", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == pistol);
+                        return (excluded && carried, $"excluded={excluded} carried={carried}");
+                    }),
+                    C("the-exclusion-survives-the-failed-click", () =>
+                    {
+                        return (failedSwitchKeptExclusion, $"kept={failedSwitchKeptExclusion}");
+                    }),
+                    C("nothing-was-remembered-from-the-failed-click", () =>
+                    {
+                        return (failedSwitchNotRemembered, $"not remembered={failedSwitchNotRemembered}");
                     }),
                 }
             });
