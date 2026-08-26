@@ -14,12 +14,12 @@ which also prints the failing checks (and that phase's informational checks, whi
 diagnose exactly that) rather than dumping sixteen phases of JSON. It fails on a crash, on a
 failed phase, on a phase that was never reached, and on an empty suite.
 
-That last pair matters: the runner's own `"passed"` is `phases.All(p => !p.failed)`, and a
+That last pair matters: the runner's own `"passed"` is `phases.All(p => !p.failed && !p.invalid)`, and a
 phase that was never reached is not marked failed — so a run that stopped early reports
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, currently in 32 phases: initial reconcile and physical fetch (memory contents,
+`supply1` covers, currently in 33 phases: initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -30,9 +30,12 @@ put back in the list.
 Phases 12-15 and 17 are the regressions from the 2026-08-23 review; 16 and 18-20 cover the
 exclusion design (#37); the final six cover the 2026-08-26 review's findings — the
 haul-back guarantee, the machine-equip asymmetry, the inventory-tab path, Release()'s
-scope, duplicate-memory handling, and the eligibility gate. Persistence claims are `N()`
-checks over windows with a `poll` action re-running the reconcile; setup facts are `P()`
-preconditions; one-shot outcomes are `C()`.
+scope, duplicate-memory handling, and the eligibility gate; later rounds added the
+exclusion-integrity, release-lifecycle, player-surface and patch-inventory phases.
+Persistence claims are `N()` checks over windows — some drive the window with a `poll`
+action re-running the reconcile, others hold across natural cadence only; setup facts
+are `P()` preconditions; one-shot outcomes are `C()`, sampled at the act when the state
+is transient.
 
 ## Benchmark
 
@@ -141,13 +144,21 @@ not a test.
 
 - The diagnostics gate cannot see load-time errors: `BaselineDiagnostics()` runs after the
   save loads, so anything logged during load — including a total patch failure from
-  Bootstrap — is swallowed. The all-patches-applied precondition phase covers the patch
-  half; a load-clean assertion for the rest is still open.
+  Bootstrap — is swallowed. The `every-declared-patch-is-applied` phase covers the patch
+  half (all 15 Harmony targets verified to carry this mod's owner); a load-clean
+  assertion for the rest is still open. Further gate blind spots, known and accepted:
+  diagnostics are deduplicated by exact text (a repeated error is attributed to its
+  first phase only); an error whose text matches any startup message is baselined away;
+  `Log.ErrorOnce` that fires during load is pre-baselined, so the "any ErrorOnce is a
+  failure" rule below is enforceable only for first occurrences after load; errors
+  after the last phase are never read.
 - `SupplySessionComponent`'s deferred release runs at load, before any phase, so the
   releasePending's arming is covered (the toggle-off phase asserts the flag is set when
   the feature goes off in-game); the once-per-load consumer, SupplySessionComponent
   .FinalizeInit, still has no in-suite coverage — it runs before the runner does.
-- Drafted-side state (`ForcedWeaponWhileDrafted`, drafted gizmo branches) has no phase.
+- Drafted-side state is partially covered: the drafted gizmo's force branch has a phase
+  (forcing an excluded weapon withdraws the exclusion); `ForcedWeaponWhileDrafted`
+  surviving a release and the drafted reconcile-cadence gap still have none.
 - No full save/load round trip of the comp (out-of-process).
 
 ## Regression

@@ -8,6 +8,7 @@ whole shape and prints the failing checks rather than the raw JSON, because a
 dump of sixteen passing phases buries the one that matters.
 """
 import json
+import re
 import sys
 
 
@@ -102,6 +103,13 @@ def merge(paths):
         merged["scenario"] = data.get("scenario", "?") + " (isolated)"
         if data.get("crashed"):
             merged["crashed"] = data["crashed"]
+        # Identity, not just count: 26 copies of phase 0 must not report 26/26.
+        m = re.search(r"-iso-(\d+)\.json$", path)
+        if m is not None and data.get("isolatedPhase") is not None \
+                and int(m.group(1)) != data["isolatedPhase"]:
+            print(f"== MISMATCH: {path} holds isolatedPhase {data['isolatedPhase']} ==",
+                  file=sys.stderr)
+            merged["passed"] = False
         merged["phases"].extend(data.get("phases") or [])
 
     expected = None
@@ -109,6 +117,11 @@ def merge(paths):
         with open(path) as fh:
             expected = json.load(fh).get("phaseCount")
         break
+    labels = [p.get("label") for p in merged["phases"]]
+    if len(set(labels)) != len(labels):
+        dupes = sorted({l for l in labels if labels.count(l) > 1})
+        print(f"== DUPLICATE PHASES IN SWEEP: {', '.join(dupes)} ==", file=sys.stderr)
+        merged["passed"] = False
     if expected is not None and len(merged["phases"]) != expected:
         print(f"== ISOLATED SWEEP INCOMPLETE: {len(merged['phases'])} of {expected} phases "
               "produced results ==", file=sys.stderr)

@@ -21,12 +21,27 @@ FILES=("${@:?files containing the fix}")
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 COMPAT="$HOME/Projects/CombatExtended-SimpleSidearms Compatibility Patch"
 RESULT="$COMPAT/test/SaveData/test-results-supply1.json"
+# The A leg's result is moved OUT of the canonical path: an aborted A/B otherwise
+# leaves a failing artifact there, indistinguishable from a real suite failure.
+AB_A="$COMPAT/test/SaveData/test-results-supply1-ab-a.json"
 
-build() { dotnet build "$REPO/Source/CESidearmsSupply/CESidearmsSupply.csproj" -c Release -v q --nologo >/dev/null; }
+for f in "${FILES[@]}"; do
+    case "$f" in Assemblies/*|*/Assemblies/*)
+        echo "!! $f is a build artifact — name source files only; the script rebuilds" >&2
+        exit 2 ;;
+    esac
+done
+
+# BOTH assemblies: an edited-but-unbuilt SupplyTestRunner.cs otherwise A/Bs the OLD
+# tests against both legs and still prints "verified".
+build() {
+    dotnet build "$REPO/Source/CESidearmsSupply/CESidearmsSupply.csproj" -c Release -v q --nologo >/dev/null
+    dotnet build "$REPO/test/StagingMod/Source/SupplyTestStaging.csproj" -c Release -v q --nologo >/dev/null
+}
 run()   { SKIP_BUILD=1 "$REPO/test/run-supply-assert.sh" supply1 SUPPLY-1-loadout-sidearms >/dev/null 2>&1 || true; }
 
 phase_state() {
-    python3 - "$RESULT" "$PHASE" <<'PY'
+    python3 - "${1:-$RESULT}" "$PHASE" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 for ph in d["phases"]:
@@ -56,9 +71,9 @@ else
 fi
 trap restore EXIT
 
-A_STATE=absent
 if build && run; then :; fi
-A=$(phase_state || echo absent)
+mv -f "$RESULT" "$AB_A" 2>/dev/null || true
+A=$(phase_state "$AB_A" || echo absent)
 restore; trap - EXIT
 # The A leg built the mod from the reverted source; rebuild on EVERY path out —
 # including a crashed run — or the tree keeps a stale DLL that poisons the next build.

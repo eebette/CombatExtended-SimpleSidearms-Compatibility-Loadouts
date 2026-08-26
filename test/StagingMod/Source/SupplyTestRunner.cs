@@ -805,6 +805,8 @@ namespace CESupplyTestStaging
             bool tabSwitchVetoLifted = false;
             bool failedSwitchKeptExclusion = false;
             bool failedSwitchNotRemembered = false;
+            bool releaseLeftNoClaims = false;
+            bool claimsReturnedAfterRestore = false;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -971,6 +973,13 @@ namespace CESupplyTestStaging
                 mutate = () => { loadout.RemoveSlot(SlotOf(shotgun)); ForceReconcile(dockie); },
                 checks =
                 {
+                    P("shotgun-was-remembered-first", () =>
+                    {
+                        // Without this, "forgotten" passes just as well when Target() claims
+                        // nothing at all and there was never a memory to forget.
+                        bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
+                        return (present, "shotgun remembered=" + present);
+                    }),
                     C("shotgun-forgotten", () =>
                     {
                         bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
@@ -1003,10 +1012,12 @@ namespace CESupplyTestStaging
                 {
                     N("manual-shotgun-survives-template-churn", () =>
                     {
-                        // Held across the window: the churn is over, so nothing may remove
-                        // this memory on any later reconcile either.
-                        bool present = Mem(dockie).RememberedWeapons.Any(p => p.thing == shotgun);
-                        return (present, "shotgun remembered=" + present);
+                        // Held across the window, and by COUNT: the claimed copy plus the
+                        // manual one. An .Any() here passed just as well if the projection
+                        // drained duplicates to exhaustion and took the player's copy with
+                        // its own.
+                        int n = Mem(dockie).RememberedWeapons.Count(p => p.thing == shotgun);
+                        return (n == 2, $"shotgun memories={n} (want 2: claimed + manual)");
                     }),
                     C("pistol-was-actually-released-first", () =>
                     {
@@ -1088,6 +1099,8 @@ namespace CESupplyTestStaging
             {
                 label = "player-pick-heads-the-list",
                 deadlineTicks = 6000,
+                minTicks = 600,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1100,8 +1113,12 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
-                    C("carried-player-pick-outranks-loadout", () =>
+                    N("carried-player-pick-outranks-loadout", () =>
                     {
+                        // Negative over a driven window, not a first-pass latch: the old
+                        // form latched after one reconcile, so a clobber on any LATER pass
+                        // was invisible — and InformOfAddedPrimary had already set the role,
+                        // so the reconcile only had to not break it once.
                         ThingDef def = Mem(dockie).DefaultRangedWeapon?.thing;
                         return (def == playerPick.def, $"default={def?.defName ?? "none"} want={playerPick.def.defName}");
                     }),
@@ -1218,16 +1235,16 @@ namespace CESupplyTestStaging
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         return (excluded, $"recorded as do-not-equip={excluded}");
                     }),
-                    C("ce-still-hauls-it", () =>
+                    N("still-carried-because-the-row-stands", () =>
                     {
-                        // The old form asserted the row still existed — but this module
-                        // contains no code that removes loadout slots, so it passed with the
-                        // feature deleted. What matters is the consequence: excluded from the
-                        // sidearm list, still carried because CE's row stands.
-                        bool declared = loadout.Slots.Any(sl => sl.thingDef == pistol);
+                        // The consequence the player sees, held across the window: the
+                        // exclusion must not get the pistol dropped — its row is declared,
+                        // so CE keeps it in the inventory with or without an SS memory.
+                        // (The old form also asserted the row itself existed, which this
+                        // module has no code to affect — that half was unfailable.)
                         bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                             .Any(w => w.def == pistol);
-                        return (declared && carried, $"row={declared} carried={carried}");
+                        return (carried, $"carried={carried}");
                     }),
                 }
             });
@@ -2096,7 +2113,15 @@ namespace CESupplyTestStaging
                     Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
                     PlayerForgets(dockie, pistol);
                 },
-                mutate = () => CESidearmsSupply.SupplyMod.Release(),
+                mutate = () =>
+                {
+                    CESidearmsSupply.SupplyMod.Release();
+                    // Sampled AT the act: with the feature on, the next natural reconcile
+                    // correctly re-claims, so "claims == 0 at the first poll" was a race
+                    // with CE's cadence — a few runs in a hundred lost it.
+                    var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    releaseLeftNoClaims = (recNow?.claimed.Count ?? -1) == 0;
+                },
                 checks =
                 {
                     P("claims-and-an-exclusion-exist", () =>
@@ -2108,9 +2133,7 @@ namespace CESupplyTestStaging
                     }),
                     C("claims-released", () =>
                     {
-                        // Sampled on the first poll, before a natural reconcile can re-claim.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        return ((rec?.claimed.Count ?? -1) == 0, $"claims={rec?.claimed.Count}");
+                        return (releaseLeftNoClaims, $"claims were zero at the release={releaseLeftNoClaims}");
                     }),
                     C("exclusion-kept", () =>
                     {
@@ -2200,12 +2223,21 @@ namespace CESupplyTestStaging
                         settings.LimitModeSingle_Selection = oldSel;
                     }
                     ForceReconcile(dockie);
+                    // The positive control: claims must RETURN once the whitelist does,
+                    // or "nothing claimed under an empty whitelist" is indistinguishable
+                    // from Target() claiming nothing under any settings at all.
+                    claimsReturnedAfterRestore =
+                        (CESidearmsSupply.CompLoadoutSidearms.For(dockie)?.claimed.Count ?? 0) > 0;
                 },
                 checks =
                 {
                     C("nothing-claimed-while-everything-was-illegal", () =>
                     {
                         return (illegalClaimCount == 0, $"claimed+remembered under empty whitelist={illegalClaimCount}");
+                    }),
+                    C("claims-return-with-the-whitelist", () =>
+                    {
+                        return (claimsReturnedAfterRestore, $"claims after restore>0={claimsReturnedAfterRestore}");
                     }),
                 }
             });
@@ -2479,6 +2511,73 @@ namespace CESupplyTestStaging
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(x => x.thing == D("Weapon_GrenadeEMP"));
                         return (claimed, $"claimed={claimed}");
+                    }),
+                }
+            });
+
+            // Every Harmony patch this mod declares, verified applied. TESTPLAN promised
+            // this phase for two rounds before it existed. It is the tripwire for the
+            // attribute-pin class of failure: an ambiguous overload upstream aborts
+            // PatchAll for the WHOLE assembly, and every phase here would then measure a
+            // world where this mod is silently absent.
+            phases.Add(new Phase
+            {
+                label = "every-declared-patch-is-applied",
+                deadlineTicks = 2000,
+                mutate = () => { },
+                checks =
+                {
+                    C("all-patch-targets-carry-our-owner", () =>
+                    {
+                        var targets = new (string name, System.Reflection.MethodBase m)[]
+                        {
+                            ("Gizmo_SidearmsList.handleInteraction", AccessTools.Method(typeof(Gizmo_SidearmsList), "handleInteraction",
+                                new[] { typeof(Gizmo_SidearmsList.SidearmsListInteraction), typeof(UnityEngine.Event) })),
+                            ("CompSidearmMemory.ForgetSidearmMemory", AccessTools.Method(typeof(CompSidearmMemory), "ForgetSidearmMemory",
+                                new[] { typeof(ThingDefStuffDefPair) })),
+                            ("CompSidearmMemory.InformOfAddedSidearm", AccessTools.Method(typeof(CompSidearmMemory), "InformOfAddedSidearm",
+                                new[] { typeof(Thing) })),
+                            ("CompSidearmMemory.UnsetRangedWeaponDefault", AccessTools.Method(typeof(CompSidearmMemory), "UnsetRangedWeaponDefault", Type.EmptyTypes)),
+                            ("CompSidearmMemory.UnsetMeleeWeaponPreference", AccessTools.Method(typeof(CompSidearmMemory), "UnsetMeleeWeaponPreference", Type.EmptyTypes)),
+                            ("CompSidearmMemory.SetRangedWeaponTypeAsDefault", AccessTools.Method(typeof(CompSidearmMemory), "SetRangedWeaponTypeAsDefault",
+                                new[] { typeof(ThingDefStuffDefPair) })),
+                            ("CompSidearmMemory.SetMeleeWeaponTypeAsPreferred", AccessTools.Method(typeof(CompSidearmMemory), "SetMeleeWeaponTypeAsPreferred",
+                                new[] { typeof(ThingDefStuffDefPair) })),
+                            ("CompSidearmMemory.SetWeaponAsForced", AccessTools.Method(typeof(CompSidearmMemory), "SetWeaponAsForced",
+                                new[] { typeof(ThingDefStuffDefPair), typeof(bool) })),
+                            ("EquipmentUtility.CanEquip", AccessTools.Method(typeof(RimWorld.EquipmentUtility), "CanEquip",
+                                new[] { typeof(Thing), typeof(Pawn), typeof(string).MakeByRefType(), typeof(bool) })),
+                            ("WeaponAssingment.equipSpecificWeapon", AccessTools.Method(typeof(WeaponAssingment), "equipSpecificWeapon",
+                                new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) })),
+                            ("WITab_Caravan_Gear.TryEquipDraggedItem", AccessTools.Method(typeof(RimWorld.Planet.WITab_Caravan_Gear), "TryEquipDraggedItem",
+                                new[] { typeof(Pawn) })),
+                            ("ITab_Inventory.DrawThingRowCE", AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "DrawThingRowCE",
+                                new[] { typeof(float).MakeByRefType(), typeof(float), typeof(Thing), typeof(bool) })),
+                            ("ITab_Inventory.SyncedTrySwitchToWeapon", AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "SyncedTrySwitchToWeapon",
+                                new[] { typeof(CombatExtended.CompInventory), typeof(ThingWithComps) })),
+                            ("Pawn_EquipmentTracker.AddEquipment", AccessTools.Method(typeof(Pawn_EquipmentTracker), "AddEquipment",
+                                new[] { typeof(ThingWithComps) })),
+                            ("JobGiver_UpdateLoadout.TryGiveJob", AccessTools.Method(typeof(CombatExtended.JobGiver_UpdateLoadout), "TryGiveJob",
+                                new[] { typeof(Pawn) })),
+                        };
+                        var missing = new List<string>();
+                        foreach (var (name, m) in targets)
+                        {
+                            if (m == null)
+                            {
+                                missing.Add(name + " (method not found)");
+                                continue;
+                            }
+                            var info = Harmony.GetPatchInfo(m);
+                            bool ours = info != null && info.Owners.Contains("eebette.CESidearmsSupply");
+                            if (!ours)
+                            {
+                                missing.Add(name);
+                            }
+                        }
+                        return (missing.Count == 0, missing.Count == 0
+                                ? $"all {targets.Length} targets patched"
+                                : "UNPATCHED: " + string.Join(", ", missing));
                     }),
                 }
             });

@@ -184,6 +184,13 @@ namespace CESupplyTestStaging
                           PawnGenerationContext.NonPlayer, forceGenerateNewPawn: true,
                           canGeneratePawnRelations: false, colonistRelationChanceFactor: 0f);
             Pawn pawn = PawnGenerator.GeneratePawn(request);
+            // A violence-incapable roll voids the whole suite: IsLegalSidearm refuses every
+            // weapon for such a pawn, so nothing is ever claimed. Reroll rather than pray.
+            for (int tries = 0; tries < 20 && pawn.WorkTagIsDisabled(WorkTags.Violent); tries++)
+            {
+                pawn.Destroy();
+                pawn = PawnGenerator.GeneratePawn(request);
+            }
             pawn.Name = new NameTriple("Test", nick, "SUPPLY");
             pawn.equipment?.DestroyAllEquipment();
             pawn.inventory?.DestroyAll();

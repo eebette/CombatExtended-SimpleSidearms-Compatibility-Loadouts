@@ -40,4 +40,15 @@ fi
 
 # The verdict decides the exit code. Printing the file and stopping there is how
 # this script spent its life reporting success for runs in which every phase failed.
+
+# A test that flips persisted mod settings must not poison the next boot: a leaked
+# loadoutWeaponsAsSidearms=False turned every later launch into a feature-off world
+# (phase 0 burned its whole deadline; caught by a human watching pawns starve).
+CFG="$SAVEDATA/Config/Mod_CESidearmsSupply_SupplyMod.xml"
+if [[ -f "$CFG" ]] && grep -qE "<loadoutWeaponsAsSidearms>False</|<releasePending>True</" "$CFG"; then
+    echo "== MOD CONFIG POISONED by this run — a test left non-default settings on disk ==" >&2
+    grep -E "loadoutWeaponsAsSidearms|releasePending" "$CFG" >&2
+    exit 1
+fi
+
 exec "$(dirname "$0")/verdict.py" "$RESULT"
