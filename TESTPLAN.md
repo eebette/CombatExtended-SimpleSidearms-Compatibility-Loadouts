@@ -156,6 +156,10 @@ not a test.
   releasePending's arming is covered (the toggle-off phase asserts the flag is set when
   the feature goes off in-game); the once-per-load consumer, SupplySessionComponent
   .FinalizeInit, still has no in-suite coverage — it runs before the runner does.
+- SS's own UI branch dispatch is not exercised: phases enter the gizmo scope directly
+  (`InGizmo` raises it around the SS memory call) rather than driving
+  `Gizmo_SidearmsList.handleInteraction`, so which branch a real click reaches is
+  untested — the scope, not the click, is what the phases prove.
 - Drafted-side state is partially covered: the drafted gizmo's force branch has a phase
   (forcing an excluded weapon withdraws the exclusion); `ForcedWeaponWhileDrafted`
   surviving a release and the drafted reconcile-cadence gap still have none.

@@ -18,7 +18,7 @@ namespace CESidearmsSupply
     /// saved and destroyed with them and follows them through caravans, death, capture and
     /// faction changes without any lifecycle code of its own.
     /// </summary>
-    public class CompLoadoutSidearms : ThingComp
+    public sealed class CompLoadoutSidearms : ThingComp
     {
         /// <summary>
         /// The pairs this projection put into Simple Sidearms' memory. A cache, not a source

@@ -23,14 +23,20 @@ namespace CESidearmsSupply.Patches
     /// declared, the record says what the player excluded, the pawn says what they carry.
     /// Running it twice on unchanged inputs is a no-op by construction rather than by
     /// argument, and no phase can destroy state a later phase needs, because the whole
-    /// difference is computed before anything is written.
+    /// difference is computed before anything in SS's memory is written. (The exclusion
+    /// prune is a write to this mod's own record and runs before Target() reads it —
+    /// deliberately, since a pruned exclusion must not keep a weapon out of the target.)
     ///
     /// Player intent outranks the loadout and is recorded where the player expresses it
     /// (see PlayerIntent), never deduced from a weapon having gone missing — Simple Sidearms
     /// drops memories on its own, most often when the pawn simply equips something else.
     ///
     /// Reconciled on CE's job-giver cadence rather than event-driven, deliberately: a missed
-    /// event is permanent, a missed pass lasts until the next one. Measured 2026-08-25
+    /// event is permanent, a missed pass lasts until the next one. The honest caveat: CE's
+    /// job giver sits in the undrafted colonist think tree, so drafted, downed, mentally
+    /// broken and caravan pawns get no passes at all until they return to it — player
+    /// gestures still record during that window, they just take effect on the first pass
+    /// after. Measured 2026-08-25
     /// (test/run-supply-bench.sh): 18.4us per call at 0.79 calls per colonist per 1000
     /// ticks — 0.0017% of a 60fps frame at 20 colonists.
     /// </summary>

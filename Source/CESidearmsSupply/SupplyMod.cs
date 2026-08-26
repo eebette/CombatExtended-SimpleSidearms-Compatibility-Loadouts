@@ -72,10 +72,15 @@ namespace CESidearmsSupply
 
             listing.Gap();
             bool inGame = Current.Game != null;
-            if (listing.ButtonText("Release all claimed sidearms",
+            if (!inGame)
+            {
+                GUI.color = Color.gray;
+            }
+            bool clicked = listing.ButtonText("Release all claimed sidearms",
                                    "Forget every sidearm this mod added, on every colonist, and start "
-                                   + "over. Weapons the loadout does not list are not touched.")
-                && inGame)
+                                   + "over. Weapons the loadout does not list are not touched.");
+            GUI.color = Color.white;
+            if (clicked && inGame)
             {
                 Release(interactive: true);
             }

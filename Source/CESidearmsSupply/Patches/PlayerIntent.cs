@@ -37,9 +37,12 @@ namespace CESidearmsSupply.Patches
         internal static bool PlayerIsDriving => gizmoDepth > 0;
 
         /// <summary>
-        /// Raised while the game builds the player's own right-click Equip option. The
-        /// CanEquip veto stands down here and only here, so the dropdown stays live while
-        /// every machine path that consults CanEquip is refused.
+        /// Raised around the player's own equip surfaces: CE's inventory tab while it
+        /// builds the menu for one carried item (so the CanEquip veto stands down and the
+        /// Equip entry stays live), and the click call chains of that tab and the caravan
+        /// gear tab (so the AddEquipment recorder knows an equip landing inside the scope
+        /// is the player's). Everything the veto refuses outside this scope is an
+        /// inventory-side machine selection; map pickups are never vetoed at all.
         /// </summary>
         internal static bool PlayerChoosing => choiceDepth > 0;
 

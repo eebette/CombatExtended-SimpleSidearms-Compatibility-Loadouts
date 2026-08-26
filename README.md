@@ -66,13 +66,19 @@ hunting a specific stuff the loadout never asked for.
 
 **Forget a declared weapon in SS's gizmo and it stays forgotten** — that is how you say *carry
 this but don't wield it*, which removing the loadout row cannot express (that would stop the
-pawn carrying it at all). The game will not arm the pawn with it on its own (the one place
-you can see the block is the inventory tab's Equip entry, which names the reason), but CE
-still hauls it for the loadout row exactly as before. To undo it: equip the weapon yourself
-— from the map right-click menu or the inventory tab — or remove and re-add its loadout row;
-any of those puts it back under loadout management immediately.
+pawn carrying it at all). The game will not arm the pawn with it on its own: CE's inventory
+picks and its loadout equip jobs are refused (the one place you can see the block is the
+inventory tab's Equip entry, which names the reason), and Simple Sidearms' own switching —
+idle re-arm, the melee swap when an enemy closes — skips it too. CE still hauls it for the
+loadout row exactly as before. To undo it: equip the weapon yourself — from the map
+right-click menu, the inventory tab, or the caravan gear tab — click it back into the
+sidearm list in SS's gizmo (or force it, while drafted), or remove and re-add its loadout
+row; any of those puts it back under loadout management immediately.
 
-Generic slots ("any ranged weapon") are ignored: there is no specific def to remember.
+Generic slots ("any ranged weapon") are ignored — there is no specific def to remember —
+and so are CE's modular weapon platforms, whose attachments cannot be captured in the
+def-plus-material pair Simple Sidearms remembers by. Both stay in the loadout and are
+hauled as normal; they just are not projected into the sidearm list.
 
 **Ammo for your sidearms is Combat Extended's job.** Add the ammo to the loadout and CE keeps
 the pawn stocked to that count — the same mechanism it uses for everything else, visible in
@@ -81,6 +87,9 @@ derive that demand automatically off CE's per-loadout "Ad hoc" checkbox; that wa
 Ad-hoc means *this pawn's primary is not in the loadout — keep it and feed it*, so borrowing
 it for declared sidearms both changed CE's drop behaviour for anyone who wanted sidearm ammo
 and forced ammo demand on anyone who wanted ad-hoc for its real purpose.
+
+**Multiplayer is untested.** The player-gesture tracking runs on UI interaction scopes; how
+those behave under RimWorld Multiplayer's synchronisation has not been verified.
 
 **What this does not enforce.** Simple Sidearms has settings limiting how many sidearms a
 pawn may carry and how heavy each may be relative to them. Those govern what a pawn picks up
