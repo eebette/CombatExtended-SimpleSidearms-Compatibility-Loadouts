@@ -29,10 +29,10 @@ bureaucratic caution, within two real limits:
   share-alike is satisfiable by marking a derived portion under CE's license in NOTICE —
   the same pattern this repo already uses for CE's badge artwork. If deriving from CE is
   ever the right engineering call, do that rather than laundering it.
-- **Simple Sidearms has no published license**, which means no grant of reuse exists. Keep
-  its source out of this repo and out of public artifacts (cite `file:line` and describe
-  instead). If its exact expression is ever genuinely needed, ask its author — that is the
-  harmony-first move, not a workaround.
+- **Simple Sidearms has no published license.** Its source is public on GitHub; the
+  project reads that as author indifference rather than prohibition, and treats it the
+  same pragmatic way as CE. A formal permission ask to the SS team is planned before this
+  suite's full release, which closes the question properly.
 
 ### Reviews and AI assistance
 
