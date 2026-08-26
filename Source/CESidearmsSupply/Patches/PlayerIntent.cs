@@ -2,6 +2,8 @@ using System;
 using HarmonyLib;
 using UnityEngine;
 using CombatExtended;
+using PeteTimesSix.SimpleSidearms;
+using PeteTimesSix.SimpleSidearms.Utilities;
 using RimWorld;
 using SimpleSidearms.rimworld;
 using Verse;
@@ -74,8 +76,12 @@ namespace CESidearmsSupply.Patches
             {
                 return false;
             }
-            Loadout loadout = Utility_Loadouts.GetLoadout(pawn);
-            return loadout != null && !loadout.defaultLoadout;
+            // Not Utility_Loadouts.GetLoadout: that INSERTS the pawn into CE's assignment
+            // dictionary when absent, and this runs inside CE's own search loops via the
+            // CanEquip postfix. A question about a pawn must not write CE state. Absent
+            // from the dictionary means default loadout means not managed.
+            return LoadoutManager.AssignedLoadouts.TryGetValue(pawn, out Loadout loadout)
+                   && loadout != null && !loadout.defaultLoadout;
         }
 
         internal static CompLoadoutSidearms RecordFor(CompSidearmMemory memory)
@@ -356,6 +362,69 @@ namespace CESidearmsSupply.Patches
                 __result = false;
                 cantReason = "excluded from " + pawn.LabelShort + "'s sidearm rotation";
             }
+        }
+    }
+
+    /// <summary>
+    /// Simple Sidearms never asks EquipmentUtility.CanEquip when switching weapons — it
+    /// honours vanilla's carry-but-do-not-wield bans (bladelink, biocode) by re-checking
+    /// those cases itself, and it selects from the pawn's CARRIED weapons, not from its own
+    /// remembered list. So an excluded weapon sitting in the inventory (where the loadout
+    /// row keeps it) is a live candidate for SS's idle re-arm, its melee swap when an enemy
+    /// closes, its post-shot swap for single-use weapons, and its auto-undraft re-arm — all
+    /// of which funnel through equipSpecificWeapon. This prefix registers the exclusion
+    /// with that funnel the same way SS already honours bladelink's.
+    ///
+    /// Player paths stay open: a gizmo click runs inside the gizmo scope (PlayerIsDriving),
+    /// and a player-ordered job carries playerForced. A forced weapon outranks the
+    /// exclusion, matching the reconcile.
+    /// </summary>
+    [HarmonyPatch(typeof(WeaponAssingment), nameof(WeaponAssingment.equipSpecificWeapon),
+                  new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) })]
+    public static class WeaponAssingment_equipSpecificWeapon_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(WeaponAssingment), nameof(WeaponAssingment.equipSpecificWeapon),
+                    new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] WeaponAssingment.equipSpecificWeapon not found — Simple "
+                      + "Sidearms can still arm a pawn with an excluded weapon on its own. "
+                      + "Simple Sidearms probably moved it.");
+            return false;
+        }
+
+        [HarmonyPrefix]
+        public static bool Prefix(Pawn pawn, ThingWithComps weapon, ref bool __result)
+        {
+            // weapon == null is SS unequipping to unarmed; never blocked.
+            if (weapon?.def == null || pawn == null || !PlayerIntent.ManagedPawn(pawn))
+            {
+                return true;
+            }
+            if (PlayerIntent.PlayerIsDriving || (pawn.CurJob?.playerForced ?? false))
+            {
+                return true;
+            }
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            if (rec == null || rec.dontEquip.Count == 0)
+            {
+                return true;
+            }
+            ThingDefStuffDefPair pair = weapon.toThingDefStuffDefPair();
+            if (!rec.dontEquip.Contains(pair))
+            {
+                return true;
+            }
+            CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
+            if (memory != null && (memory.ForcedWeapon == pair || memory.ForcedWeaponWhileDrafted == pair))
+            {
+                return true;
+            }
+            __result = false;
+            return false;
         }
     }
 

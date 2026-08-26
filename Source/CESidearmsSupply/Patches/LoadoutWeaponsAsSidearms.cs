@@ -8,6 +8,7 @@ using PeteTimesSix.SimpleSidearms.Utilities;
 using RimWorld;
 using SimpleSidearms.rimworld;
 using Verse;
+using Verse.AI;
 
 namespace CESidearmsSupply.Patches
 {
@@ -33,7 +34,7 @@ namespace CESidearmsSupply.Patches
     /// (test/run-supply-bench.sh): 18.4us per call at 0.79 calls per colonist per 1000
     /// ticks — 0.0017% of a 60fps frame at 20 colonists.
     /// </summary>
-    [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob")]
+    [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob", new[] { typeof(Pawn) })]
     public static class JobGiver_UpdateLoadout_TryGiveJob_Patch
     {
         /// <summary>
@@ -75,6 +76,65 @@ namespace CESidearmsSupply.Patches
             }
         }
 
+        /// <summary>
+        /// CE's job giver does not only haul: when the pawn's current primary is empty or
+        /// not covered by a loadout row, it issues a real Equip job on the priority ground
+        /// item (JobGiver_UpdateLoadout.GetUpdateLoadoutJob), or sets the equip flag on a
+        /// TakeFromOther when a fellow pawn carries it. For an excluded weapon that would
+        /// wield the exact thing the player said not to wield — and Simple Sidearms' own
+        /// equip hook would then re-remember it with no player anywhere in the chain.
+        ///
+        /// Carrying is what the loadout row asks for and what the exclusion permits, so the
+        /// job is downgraded, not refused: Equip becomes TakeCountToInventory (the same job
+        /// CE builds on its own haul branch), and TakeFromOther keeps the transfer but loses
+        /// its equip flag. The row still gets satisfied; the weapon stays out of the hands.
+        /// </summary>
+        [HarmonyPostfix]
+        public static void Postfix(Pawn pawn, ref Job __result)
+        {
+            try
+            {
+                if (__result == null || pawn == null || !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+                {
+                    return;
+                }
+                bool equip = __result.def == JobDefOf.Equip;
+                bool takeAndEquip = __result.def == CE_JobDefOf.TakeFromOther
+                                    && __result.GetTarget(TargetIndex.C).HasThing;
+                if (!equip && !takeAndEquip)
+                {
+                    return;
+                }
+                CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+                if (rec == null || rec.dontEquip.Count == 0
+                    || !(__result.GetTarget(TargetIndex.A).Thing is ThingWithComps weapon)
+                    || weapon.def == null
+                    || !rec.dontEquip.Contains(weapon.toThingDefStuffDefPair())
+                    || !PlayerIntent.ManagedPawn(pawn))
+                {
+                    return;
+                }
+                if (equip)
+                {
+                    Job haul = JobMaker.MakeJob(JobDefOf.TakeCountToInventory, weapon);
+                    haul.count = 1;
+                    haul.MakeDriver(pawn);
+                    __result = haul;
+                }
+                else
+                {
+                    // JobDriver_TakeFromOther reads "equip afterwards" from target C holding
+                    // a thing; clearing it leaves a plain take-to-inventory.
+                    __result.SetTarget(TargetIndex.C, LocalTargetInfo.Invalid);
+                }
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce($"[Sidearms&Supply] Excluded-weapon job downgrade failed for {pawn}: {e}",
+                              0x53535232 ^ (pawn?.thingIDNumber ?? 0) ^ e.GetType().Name.GetHashCode());
+            }
+        }
+
         public static void Reconcile(Pawn pawn)
         {
             if (pawn == null || !pawn.IsColonist || pawn.Dead)
@@ -92,7 +152,10 @@ namespace CESidearmsSupply.Patches
             }
             CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
-            if (memory?.RememberedWeapons == null || rec == null)
+            // memory == null, not memory?.RememberedWeapons == null: the getter never
+            // returns null — it regenerates the list from carried weapons as a side effect,
+            // which is not something a null guard should be triggering.
+            if (memory == null || rec == null)
             {
                 return;
             }
@@ -131,14 +194,8 @@ namespace CESidearmsSupply.Patches
 
             HashSet<ThingDefStuffDefPair> target = Target(pawn, rec, declared);
 
-            // Kept BEFORE Apply reassigns rec.claimed: First() prefers the pair that backed
-            // the role on previous passes, and reading the freshly rebuilt list instead made
-            // that preference match anything and the deterministic fallback unreachable —
-            // the role could still flip with inventory order.
-            List<ThingDefStuffDefPair> previouslyClaimed = rec.claimed;
-
             Apply(memory, rec, target, forced, forcedDrafted);
-            AssertRoles(pawn, memory, rec, declared, target, forced, previouslyClaimed);
+            AssertRoles(pawn, memory, rec, declared, target, forced);
         }
 
         /// <summary>
@@ -231,6 +288,25 @@ namespace CESidearmsSupply.Patches
                 }
             }
 
+            // Self-heal: a pair that is both excluded and remembered means a machine path
+            // wrote the memory back behind the recorder — every player gesture that re-adds
+            // a weapon withdraws its exclusion first, so nothing legitimate is ever on both
+            // lists. Not gated on rec.claimed: the machine's copy never entered it, which is
+            // exactly why nothing else can release it. Drained to exhaustion for the same
+            // reason — none of the copies can be the player's.
+            foreach (ThingDefStuffDefPair banned in rec.dontEquip)
+            {
+                if (banned == forced || banned == forcedDrafted)
+                {
+                    continue;
+                }
+                int guard = memory.RememberedWeapons.Count;
+                while (guard-- > 0 && memory.RememberedWeapons.Contains(banned))
+                {
+                    memory.ForgetSidearmMemory(banned);
+                }
+            }
+
             foreach (ThingDefStuffDefPair wanted in target.Where(p => !memory.RememberedWeapons.Contains(p)))
             {
                 memory.RememberedWeapons.Add(wanted);
@@ -250,8 +326,7 @@ namespace CESidearmsSupply.Patches
         /// </summary>
         private static void AssertRoles(Pawn pawn, CompSidearmMemory memory, CompLoadoutSidearms rec,
                                         List<ThingDef> declared, HashSet<ThingDefStuffDefPair> target,
-                                        ThingDefStuffDefPair? forced,
-                                        List<ThingDefStuffDefPair> previouslyClaimed)
+                                        ThingDefStuffDefPair? forced)
         {
             if (memory.ForcedUnarmed)
             {
@@ -265,7 +340,8 @@ namespace CESidearmsSupply.Patches
             if (!forcedRanged && !rec.rangedRoleVetoed
                 && !PlayersAndInHand(pawn, memory.DefaultRangedWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, previouslyClaimed, d => d.IsRangedWeapon);
+                ThingDefStuffDefPair? pick = First(declared, target, memory.DefaultRangedWeapon,
+                                                   d => d.IsRangedWeapon);
                 if (pick.HasValue && memory.DefaultRangedWeapon != pick)
                 {
                     memory.SetRangedWeaponTypeAsDefault(pick.Value);
@@ -278,7 +354,8 @@ namespace CESidearmsSupply.Patches
             }
             if (!PlayersAndInHand(pawn, memory.PreferredMeleeWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, previouslyClaimed, d => d.IsMeleeWeapon);
+                ThingDefStuffDefPair? pick = First(declared, target, memory.PreferredMeleeWeapon,
+                                                   d => d.IsMeleeWeapon);
                 if (pick.HasValue && memory.PreferredMeleeWeapon != pick)
                 {
                     memory.SetMeleeWeaponTypeAsPreferred(pick.Value);
@@ -290,14 +367,21 @@ namespace CESidearmsSupply.Patches
         /// First declared def of this category with a pair in the target set.
         ///
         /// `target` is a set, so with two materials of one def carried the answer would
-        /// otherwise depend on enumeration order — which follows inventory order, which CE's
-        /// constant ammo churn reorders. Every flip re-set the role and made the pawn
-        /// physically swap weapons. Prefer the pair already claimed, so a settled role stays
-        /// settled, and fall back to a deterministic key rather than to whatever comes first.
+        /// otherwise depend on enumeration order — which follows inventory order, which
+        /// every equip/unequip and CE's ammo churn reorder. Every flip re-set the role and
+        /// made the pawn physically swap weapons. The pair currently holding the role wins
+        /// outright: it is one value, so it can actually discriminate between two materials
+        /// of one def — a list of previously-claimed pairs contained both candidates and
+        /// the preference collapsed back to inventory order. It also means a player's
+        /// hand-set role on a declared weapon is its own proof against the next pass.
+        ///
+        /// A fresh pick uses Simple Sidearms' own "best copy" key — market value,
+        /// descending, the ordering equipSpecificWeaponTypeFromInventory applies when
+        /// choosing among copies of a pair — then stuff name for determinism.
         /// </summary>
         private static ThingDefStuffDefPair? First(List<ThingDef> declared,
                                                    HashSet<ThingDefStuffDefPair> target,
-                                                   List<ThingDefStuffDefPair> previouslyClaimed,
+                                                   ThingDefStuffDefPair? currentRole,
                                                    Func<ThingDef, bool> category)
         {
             foreach (ThingDef def in declared.Where(category))
@@ -307,14 +391,14 @@ namespace CESidearmsSupply.Patches
                 {
                     continue;
                 }
-                foreach (ThingDefStuffDefPair claimed in previouslyClaimed)
+                if (currentRole.HasValue && candidates.Contains(currentRole.Value))
                 {
-                    if (candidates.Contains(claimed))
-                    {
-                        return claimed;
-                    }
+                    return currentRole.Value;
                 }
-                return candidates.OrderBy(p => p.stuff?.defName ?? string.Empty).First();
+                return candidates
+                    .OrderByDescending(p => p.thing.GetStatValueAbstract(StatDefOf.MarketValue, p.stuff))
+                    .ThenBy(p => p.stuff?.defName ?? string.Empty)
+                    .First();
             }
             return null;
         }

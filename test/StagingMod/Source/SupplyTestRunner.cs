@@ -275,6 +275,21 @@ namespace CESupplyTestStaging
                 return;
             }
 
+            // Poll BEFORE the checks, so the state the checks evaluate includes the last
+            // action the phase drove. Polling after meant a phase could advance on state
+            // observed before its own final act.
+            if (phase.mutated)
+            {
+                try
+                {
+                    phase.poll?.Invoke();
+                }
+                catch (Exception e)
+                {
+                    Log.Error($"[SupplyTest] poll for '{phase.label}' threw: " + e);
+                }
+            }
+
             bool allPass = true;
             bool preconditionsHold = true;
             Check tripped = null;
@@ -322,18 +337,6 @@ namespace CESupplyTestStaging
                     {
                         allPass = false;
                     }
-                }
-            }
-
-            if (phase.mutated)
-            {
-                try
-                {
-                    phase.poll?.Invoke();
-                }
-                catch (Exception e)
-                {
-                    Log.Error($"[SupplyTest] poll for '{phase.label}' threw: " + e);
                 }
             }
 
@@ -794,6 +797,9 @@ namespace CESupplyTestStaging
             bool tabSwitchRole = false;
             bool sniperWasPrimaryAtEquip = false;
             bool shotgunWasDropped = false;
+            bool machineEquipLanded = false;
+            bool sniperWasExcludedAtDrop = false;
+            ThingDefStuffDefPair? meleeRoleAtSettle = null;
 
             var phases = new List<Phase>();
 
@@ -1772,6 +1778,32 @@ namespace CESupplyTestStaging
             {
                 label = "an-excluded-weapon-is-still-hauled-back",
                 deadlineTicks = 25000,
+                poll = () =>
+                {
+                    // The gesture's drop half can fail quietly (both drop APIs return a
+                    // bool nothing reads) and one run failed exactly there, with the
+                    // haul-back check then latching on "still carried" before any drop.
+                    // So the drop is CONFIRMED here, retried until it lands, and the
+                    // haul-back check below is gated on it having happened.
+                    if (!shotgunWasDropped)
+                    {
+                        ThingWithComps t2 = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .FirstOrDefault(w => w.def == shotgun);
+                        if (t2 == null)
+                        {
+                            shotgunWasDropped = true;
+                        }
+                        else if (dockie.equipment?.Primary == t2)
+                        {
+                            dockie.equipment.TryDropEquipment(t2, out _, dockie.Position, forbid: false);
+                        }
+                        else
+                        {
+                            dockie.inventory?.innerContainer?.TryDrop(t2, dockie.Position, dockie.Map,
+                                ThingPlaceMode.Near, out _);
+                        }
+                    }
+                },
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1780,14 +1812,9 @@ namespace CESupplyTestStaging
                     if (t != null)
                     {
                         // The REAL removal gesture: SS's carried-weapon branch, which drops
-                        // the weapon before forgetting it. "On the ground" is sampled HERE:
-                        // it is momentary by design — the fixed CE re-hauls a drop landing at
-                        // the pawn's feet within ticks, so a precondition on it races the
-                        // exact behaviour this phase proves.
+                        // the weapon before forgetting it.
                         InGizmo(() => WeaponAssingment.DropSidearm(dockie, t,
                             intentionalDrop: true, unmemorise: true));
-                        shotgunWasDropped = !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                            .Any(w => w.def == shotgun);
                         ForceReconcile(dockie);
                     }
                 },
@@ -1807,13 +1834,21 @@ namespace CESupplyTestStaging
                     {
                         bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                             .Any(w => w.def == shotgun);
-                        return (carried, $"carried again={carried}");
+                        // Gated on the drop: "still carried because it never left" must not
+                        // satisfy the check that exists to prove it comes BACK.
+                        return (shotgunWasDropped && carried,
+                                $"dropped={shotgunWasDropped} carried again={carried}");
                     }),
                     N("and-it-is-never-re-claimed", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == shotgun);
                         return (!claimed, $"re-claimed={claimed}");
+                    }),
+                    N("and-it-is-never-wielded", () =>
+                    {
+                        bool wielded = dockie.equipment?.Primary?.def == shotgun;
+                        return (!wielded, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
                     }),
                 }
             });
@@ -1826,7 +1861,23 @@ namespace CESupplyTestStaging
                 label = "a-machine-equip-does-not-clear-the-exclusion",
                 deadlineTicks = 15000,
                 minTicks = 600,
-                poll = () => ForceReconcile(dockie),
+                poll = () =>
+                {
+                    // Sampled before the reconcile: the equip landing is the event this
+                    // phase exists around, and without the capture the negative below holds
+                    // just as well when the equip never happened at all.
+                    if (dockie.equipment?.Primary?.def == pistol)
+                    {
+                        machineEquipLanded = true;
+                    }
+                    // Drafting held CE's think tree off the ground pistol so the forced
+                    // equip could not be out-raced; done with it once the equip landed.
+                    if (machineEquipLanded && (dockie.drafter?.Drafted ?? false))
+                    {
+                        dockie.drafter.Drafted = false;
+                    }
+                    ForceReconcile(dockie);
+                },
                 arrange = () =>
                 {
                     Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
@@ -1838,6 +1889,13 @@ namespace CESupplyTestStaging
                         .FirstOrDefault(w => w.def == pistol);
                     if (t != null)
                     {
+                        // Drafted, so CE's job giver cannot re-haul the dropped pistol and
+                        // out-race the forced equip — the phase failed its own landed-check
+                        // on runs where CE won that race.
+                        if (dockie.drafter != null)
+                        {
+                            dockie.drafter.Drafted = true;
+                        }
                         dockie.inventory.innerContainer.TryDrop(t, dockie.Position, dockie.Map,
                             ThingPlaceMode.Near, out Thing dropped);
                         if (dropped is ThingWithComps ground)
@@ -1857,6 +1915,10 @@ namespace CESupplyTestStaging
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"excluded={excluded}");
+                    }),
+                    C("the-machine-equip-landed", () =>
+                    {
+                        return (machineEquipLanded, $"landed={machineEquipLanded}");
                     }),
                     N("exclusion-survives-the-machine-equip", () =>
                     {
@@ -2050,6 +2112,160 @@ namespace CESupplyTestStaging
                     }),
                 }
             });
+
+            // The other, worse half of the ground-item story: CE does not only haul.
+            // When the pawn's primary is empty (which the removal gesture on a wielded
+            // weapon guarantees) or not covered by a loadout row, CE issues a real Equip
+            // job on the priority ground item — wielding the exact weapon the player just
+            // excluded, after which SS's own equip hook re-remembers it with no player
+            // anywhere in the chain. The fix downgrades the job to a plain take; and even
+            // once the weapon is back in the inventory, SS's own switching (which never
+            // consults CanEquip) must not draw it either.
+            phases.Add(new Phase
+            {
+                label = "an-excluded-weapon-on-the-ground-is-not-wielded-by-the-machine",
+                deadlineTicks = 25000,
+                minTicks = 900,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
+                {
+                    ThingWithComps sn = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == sniper);
+                    if (sn == null)
+                    {
+                        return;
+                    }
+                    // Wield it first, so the removal gesture leaves the primary empty and
+                    // CE's equip branch — not its haul branch — is the live one.
+                    if (dockie.equipment?.Primary != sn)
+                    {
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.TrySwitchToWeapon(sn);
+                    }
+                    InGizmo(() => WeaponAssingment.DropSidearm(dockie, sn,
+                        intentionalDrop: true, unmemorise: true));
+                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    sniperWasExcludedAtDrop = rec != null && rec.dontEquip.Any(pr => pr.thing == sniper);
+                },
+                checks =
+                {
+                    C("sniper-was-excluded-at-the-drop", () =>
+                    {
+                        return (sniperWasExcludedAtDrop, $"excluded at drop={sniperWasExcludedAtDrop}");
+                    }),
+                    C("ce-takes-it-back-to-inventory", () =>
+                    {
+                        bool inInventory = dockie.inventory?.innerContainer?
+                            .Any(t => t.def == sniper) ?? false;
+                        return (inInventory, $"in inventory={inInventory}");
+                    }),
+                    N("the-sniper-is-never-wielded-again", () =>
+                    {
+                        bool wielded = dockie.equipment?.Primary?.def == sniper;
+                        return (!wielded, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            // Two materials of one declared def: the role must settle on one of them and
+            // stay there while the inventory reorders underneath — which every equip,
+            // unequip and CE ammo shuffle does. The old preference read the previous claim
+            // list, which contained BOTH candidates, so the role followed enumeration
+            // order; the fix pins the pair currently holding the role.
+            phases.Add(new Phase
+            {
+                label = "a-role-settles-between-two-materials-of-one-def",
+                deadlineTicks = 8000,
+                minTicks = 900,
+                poll = () => ForceReconcile(dockie),
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    // A second copy in a DIFFERENT material than whatever the staged one
+                    // is — hardcoding plasteel made a duplicate pair the moment the staged
+                    // gladius happened to be plasteel itself.
+                    ThingWithComps staged = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == gladius);
+                    ThingDef otherStuff = staged?.Stuff == ThingDefOf.Plasteel
+                        ? ThingDefOf.Steel : ThingDefOf.Plasteel;
+                    ThingWithComps second = (ThingWithComps)ThingMaker.MakeThing(gladius, otherStuff);
+                    dockie.inventory.innerContainer.TryAdd(second);
+                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    ForceReconcile(dockie);
+                },
+                mutate = () =>
+                {
+                    // The settled role, sampled at the act. Which material won is not the
+                    // claim (market value decides that fresh pick); the claim is that it
+                    // never changes afterwards.
+                    meleeRoleAtSettle = Mem(dockie).PreferredMeleeWeapon;
+                    // Reorder the inventory the way play constantly does: pull one copy
+                    // out and append it, flipping enumeration order.
+                    ThingWithComps g = dockie.inventory.innerContainer.OfType<ThingWithComps>()
+                        .FirstOrDefault(t => t.def == gladius);
+                    if (g != null)
+                    {
+                        dockie.inventory.innerContainer.Remove(g);
+                        dockie.inventory.innerContainer.TryAdd(g);
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    P("two-materials-are-claimed", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var pairs = rec == null ? new List<ThingDefStuffDefPair>()
+                            : rec.claimed.Where(pr => pr.thing == gladius).ToList();
+                        var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Where(w => w.def == gladius)
+                            .Select(w => (w.Stuff?.defName ?? "null")
+                                + ":valid=" + StatCalculator.isValidSidearm(w.toThingDefStuffDefPair(), out string why) + why)
+                            .ToList();
+                        return (pairs.Count == 2,
+                                $"claimed=[{string.Join(",", pairs.Select(pr => pr.stuff?.defName ?? "null"))}] "
+                                + $"carried=[{string.Join(",", carried)}] "
+                                + $"dontEquip=[{string.Join(",", (rec?.dontEquip ?? new List<ThingDefStuffDefPair>()).Select(pr => (pr.thing?.defName ?? "null") + "/" + (pr.stuff?.defName ?? "null")))}]");
+                    }),
+                    C("a-role-was-settled-at-the-act", () =>
+                    {
+                        return (meleeRoleAtSettle.HasValue,
+                                $"role at act={meleeRoleAtSettle?.thing?.defName ?? "none"}");
+                    }),
+                    N("the-role-never-flips", () =>
+                    {
+                        var now = Mem(dockie).PreferredMeleeWeapon;
+                        bool stable = now == meleeRoleAtSettle;
+                        return (stable, $"was={meleeRoleAtSettle?.stuff?.defName ?? "null"} "
+                                        + $"now={now?.stuff?.defName ?? "null"}");
+                    }),
+                }
+            });
+
+            // Standing invariant, appended to every phase: nothing is ever both excluded
+            // and remembered. A pair on both lists means a machine path wrote SS memory
+            // back behind the recorder — the permanent-leak state the self-heal exists to
+            // clear. Every player gesture that re-adds a weapon withdraws its exclusion
+            // first, so there is no legitimate way to be on both lists at a poll boundary.
+            foreach (Phase phase in phases)
+            {
+                phase.checks.Add(N("no-pair-is-both-excluded-and-remembered", () =>
+                {
+                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    if (rec == null || rec.dontEquip.Count == 0)
+                    {
+                        return (true, "no exclusions");
+                    }
+                    var mem = Mem(dockie);
+                    if (mem == null)
+                    {
+                        return (true, "no memory comp");
+                    }
+                    var both = mem.RememberedWeapons.Where(pr => rec.dontEquip.Contains(pr)).ToList();
+                    return (both.Count == 0, both.Count == 0 ? "clean"
+                            : "on both lists: " + string.Join(",", both.Select(pr => pr.thing?.defName)));
+                }));
+            }
 
             return phases;
         }
