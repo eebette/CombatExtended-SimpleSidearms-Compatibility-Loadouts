@@ -2126,7 +2126,12 @@ namespace CESupplyTestStaging
                 label = "an-excluded-weapon-on-the-ground-is-not-wielded-by-the-machine",
                 deadlineTicks = 25000,
                 minTicks = 900,
-                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                // Single-row loadout, deliberately: with any other declared weapon carried,
+                // SS re-arms it within ticks of the drop, the primary is loadout-covered
+                // again, and CE takes its haul branch even WITHOUT the fix — the wield
+                // branch this phase pins fires only while the primary is empty or not
+                // covered by a row.
+                arrange = () => Baseline(dockie, loadout, sniper),
                 mutate = () =>
                 {
                     ThingWithComps sn = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
