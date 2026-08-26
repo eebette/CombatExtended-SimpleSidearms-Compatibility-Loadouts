@@ -578,6 +578,7 @@ namespace CESupplyTestStaging
                         + $"ranged={m.DefaultRangedWeapon?.thing?.defName ?? "-"} "
                         + $"melee={m.PreferredMeleeWeapon?.thing?.defName ?? "-"} "
                         + $"forced={m.ForcedWeapon?.thing?.defName ?? "-"} "
+                        + $"primary={pawn.equipment?.Primary?.def?.defName ?? "-"} "
                         + $"vetoR={rec?.rangedRoleVetoed} vetoM={rec?.meleeRoleVetoed} "
                         + $"job={pawn.CurJobDef?.defName ?? "-"}");
                 },
@@ -646,6 +647,22 @@ namespace CESupplyTestStaging
             foreach (ThingDef def in rows)
             {
                 loadout.AddSlot(new LoadoutSlot(def, 1));
+            }
+
+            // Possession. The staged save spawns the kit on the MAP — phase one exists to
+            // watch CE fetch it, and every sequenced phase after inherits the result. A phase
+            // running alone inherits nothing, and without the weapons in hand the reconcile
+            // claims an empty set, a forget has nothing to forget, and SS's own
+            // equip-memorise clears a forced weapon mid-window while CE fetches. Establishing
+            // a world includes establishing what the pawn is holding.
+            foreach (ThingDef def in rows)
+            {
+                if (!pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true).Any(w => w.def == def))
+                {
+                    var made = (ThingWithComps)ThingMaker.MakeThing(def,
+                        def.MadeFromStuff ? GenStuff.DefaultStuffFor(def) : null);
+                    pawn.inventory.innerContainer.TryAdd(made, canMergeWithExistingStacks: true);
+                }
             }
 
             // The vetoes above were written through the same methods the intent hooks watch,
@@ -1037,7 +1054,26 @@ namespace CESupplyTestStaging
             {
                 label = "loadout-takes-over-when-pick-is-gone",
                 deadlineTicks = 6000,
-                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                // Owns its context: the undeclared pick used to be a local left behind by the
+                // previous phase, which is a NullReferenceException the moment this phase runs
+                // alone. Same battlefield-pickup modelling as that phase, re-established here.
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    // Reuse a carried SMG before manufacturing one: in sequence the previous
+                    // phase's pick is still in the inventory, and a second copy means the
+                    // mutate removes ours while theirs keeps the role — correctly. Arrange
+                    // reconciles the world to its spec; it does not add to whatever is there.
+                    playerPick = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == D("Gun_HeavySMG"));
+                    if (playerPick == null)
+                    {
+                        playerPick = (ThingWithComps)ThingMaker.MakeThing(D("Gun_HeavySMG"));
+                        dockie.inventory.innerContainer.TryAdd(playerPick, true);
+                    }
+                    Mem(dockie).InformOfAddedPrimary(playerPick);
+                    ForceReconcile(dockie);
+                },
                 mutate = () =>
                 {
                     dockie.inventory.innerContainer.Remove(playerPick);
@@ -1075,8 +1111,10 @@ namespace CESupplyTestStaging
                         // inventory, not to their hands, so restoring it as the role would be
                         // inferring intent from an automatic action. Equip it again to lead.
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool claimed = rec != null && rec.claimed.Any(p => p.thing == playerPick.def);
-                        return (!claimed, $"undeclared pick claimed={claimed}");
+                        bool claimed = playerPick != null && rec != null
+                                       && rec.claimed.Any(p => p.thing == playerPick.def);
+                        return (playerPick != null && !claimed,
+                                playerPick == null ? "no pick arranged" : $"undeclared pick claimed={claimed}");
                     }),
                 }
             });
@@ -1616,15 +1654,15 @@ namespace CESupplyTestStaging
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
-                    C("ordered-equip-ran", () =>
+                    C("pistol-was-dropped-for-the-order", () =>
                     {
-                        // Act-created, so an outcome check: the drop happened and the pawn
-                        // either has the job or has already completed it.
-                        bool have = droppedPistol != null;
-                        bool job = dockie.CurJobDef == JobDefOf.Equip
-                                   || dockie.jobs.jobQueue.Any(j => j.job.def == JobDefOf.Equip);
-                        return (have && (job || dockie.equipment?.Primary?.def == pistol),
-                                $"dropped={have} equipJob={job}");
+                        // Only the setup half is asserted directly. "The equip ran" was first
+                        // written as job-in-flight-or-pistol-is-primary, which races SS's own
+                        // idle switching — it legitimately swaps the pawn back toward the
+                        // sniper role between polls, so the transient window can fall between
+                        // samples. The durable completion proof is the two outcome checks
+                        // below: only this phase's playerForced equip can produce them.
+                        return (droppedPistol != null, $"dropped={droppedPistol != null}");
                     }),
                     C("exclusion-withdrawn", () =>
                     {

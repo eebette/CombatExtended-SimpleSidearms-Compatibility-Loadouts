@@ -128,6 +128,23 @@ Each phase is `arrange -> wait for preconditions -> mutate -> assert`:
 - Every phase carries a **state dump** (informational, re-evaluates every poll). When it
   disagrees with the checks beside it, a check has latched on the wrong world.
 
+Five rules, each first paid for as a real failure in this suite:
+
+1. **Arrange the whole world — possession included.** The staged save spawns the kit on the
+   map because phase one tests the fetch; every other phase must put the weapons in the
+   pawn's hands itself, or in isolation it claims an empty set and SS's own equip-memorise
+   fires mid-window while CE fetches.
+2. **Context in arrange, acts in mutate.** mutate waits for the preconditions; a
+   precondition that only becomes true inside mutate deadlocks the phase into VOID.
+3. **Arrange reconciles the world to its spec — it does not add to what is there.** Reuse a
+   leftover before manufacturing a duplicate, or the mutate removes yours while the
+   leftover keeps the behavior alive.
+4. **Assert what this module controls.** "SS never remembers it again" and "CE drops it"
+   are other mods' timing; the module's own writes and records are assertable.
+5. **Assert what persists, not what passes through.** A job in flight and a mid-window
+   role are transients that fall between 30-tick polls; the durable consequence is the
+   evidence.
+
 Two suites, one set of phases: `run-supply-assert.sh` runs them in sequence against
 accumulated state (~3 min); `run-supply-isolated.sh` runs each in its own process against a
 freshly loaded save (~25 min, pre-release). A phase that passes in sequence and fails alone
