@@ -2,43 +2,41 @@
 
 ## Working with Combat Extended and Simple Sidearms
 
-This mod patches two mods it cannot ship, cannot vendor, and cannot copy from.
+This mod patches two mods it references but must not mirror.
 
-- **Simple Sidearms has no published license.** Nothing from it may be redistributed or
-  reproduced in any form.
-- **Combat Extended is CC BY-NC-SA 4.0.** Its non-commercial and share-alike terms are
-  incompatible with this project's MIT license, so its code cannot be incorporated either.
+### The rule, and why it exists
 
-Both are decompiled locally during development to understand their behaviour. Those
-decompiles are **behavioural reference only**.
+**Read upstream to learn what it does, then call it. Don't retype it.**
 
-### The rule
+This is an engineering rule before it is anything else. A mirrored predicate, formula, or
+constant is a fork: it drifts silently when upstream changes, it breaks on their next
+release, and it can faithfully copy their bugs — this suite once mirrored a range gate
+*including* its squared-vs-unsquared defect, which is the anti-pattern in one line. Calling
+upstream keeps one implementation and one owner per behaviour, which is the whole point of a
+compatibility patch.
 
-**Read upstream to learn what it does, then call it. Never retype it.**
+When upstream has no entry point for what you need, in order of preference: compose the
+public API that exists; use vanilla RimWorld's API; ask upstream for a seam (this suite
+prefers upstream fixes generally); or decide not to enforce the behaviour and say so in the
+README. Publicized private members count as calls, not copies.
 
-This covers more than whole methods. A transcribed predicate, formula, or magic constant
-is still a copy — including short ones. If you found it by reading a decompile and typed
-it into this repository, that is copying, regardless of length.
+### Licensing, pragmatically
 
-### When upstream has no entry point for what you need
+Nobody in this chain profits from this work. Harmony between the patches outranks
+bureaucratic caution, within two real limits:
 
-This happens, and it is not licence to reimplement. In order of preference:
-
-1. **Compose the public API that does exist.** Several narrower calls beat one
-   reimplementation.
-2. **Use vanilla RimWorld's own API** where the rule is really a vanilla concept that
-   upstream merely re-expressed.
-3. **Ask upstream to expose it.** A missing accessor is a reasonable feature request, and
-   this suite's standing preference is to fix things upstream where possible.
-4. **Decide not to enforce it, and document that.** An explicit, stated gap in the README
-   is honest. A local reimplementation that silently drifts from upstream is not.
+- **Combat Extended is CC BY-NC-SA 4.0.** A free mod does not trip the NC clause, and
+  share-alike is satisfiable by marking a derived portion under CE's license in NOTICE —
+  the same pattern this repo already uses for CE's badge artwork. If deriving from CE is
+  ever the right engineering call, do that rather than laundering it.
+- **Simple Sidearms has no published license**, which means no grant of reuse exists. Keep
+  its source out of this repo and out of public artifacts (cite `file:line` and describe
+  instead). If its exact expression is ever genuinely needed, ask its author — that is the
+  harmony-first move, not a workaround.
 
 ### Reviews and AI assistance
 
-If you brief a reviewer, human or otherwise, **state this constraint as a rule about
-their recommendations, not just their report.** Telling a reviewer "don't quote upstream
-source in your findings" leaves them free to recommend reimplementing it — and they will,
-because it is usually the shortest fix. An unstated constraint is invisible.
-
-Treat a finding that says some code "matches upstream exactly" as a report of copying,
-not as a confirmation of correctness.
+State the no-mirroring rule as a constraint on **recommendations**, not just report text —
+reviewers otherwise propose transcription, because it is usually the shortest fix. Treat
+"this code matches upstream exactly" as a report of mirroring (a design finding, rated by
+fragility), not as a confirmation of correctness.
