@@ -2283,6 +2283,11 @@ namespace CESupplyTestStaging
             // other save is swept on its next load — the flag was previously armed only in
             // the no-save-loaded branch, so a second colony kept its claims forever (and
             // the compat patch's drop exemption pinned those weapons in inventories).
+            //
+            // A/B note: on a pre-fix tree this phase fails in mutate with a
+            // MissingMethodException (Release(bool) does not exist there), not on the
+            // armed-flag check itself. The verdict direction is still right — the old tree
+            // cannot arm the flag — but the A leg pins the signature, not the semantics.
             phases.Add(new Phase
             {
                 label = "turning-the-feature-off-sweeps-this-colony-and-arms-the-rest",
@@ -2305,9 +2310,14 @@ namespace CESupplyTestStaging
                     {
                         // Mirror the settings window's re-enable path: turning the feature
                         // back on clears the pending flag so the deferred sweep does not
-                        // fire on an enabled feature.
+                        // fire on an enabled feature. Written to DISK, not just memory:
+                        // Release() persisted the flipped values via Settings.Write(), and
+                        // leaving them on disk poisoned every later game launch — the
+                        // feature booted off, phase 0 burned its whole deadline fetching
+                        // nothing, and the A/B legs judged a broken world.
                         settings.loadoutWeaponsAsSidearms = true;
                         settings.releasePending = wasPending;
+                        settings.Write();
                     }
                     ForceReconcile(dockie);
                 },
