@@ -2181,7 +2181,23 @@ namespace CESupplyTestStaging
                 label = "a-role-settles-between-two-materials-of-one-def",
                 deadlineTicks = 8000,
                 minTicks = 900,
-                poll = () => ForceReconcile(dockie),
+                poll = () =>
+                {
+                    // The inventory order is flipped on EVERY poll — the churn equips,
+                    // unequips and ammo shuffles produce in play. Under the old logic the
+                    // preference followed the claim list, whose order lags the enumeration
+                    // by one pass, so continuous churn makes the role oscillate; the pinned
+                    // role holder cannot.
+                    ThingWithComps g = dockie.inventory.innerContainer.OfType<ThingWithComps>()
+                        .FirstOrDefault(t => t.def == gladius);
+                    if (g != null)
+                    {
+                        dockie.inventory.innerContainer.Remove(g);
+                        dockie.inventory.innerContainer.TryAdd(g);
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    ForceReconcile(dockie);
+                },
                 arrange = () =>
                 {
                     Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
@@ -2201,19 +2217,8 @@ namespace CESupplyTestStaging
                 {
                     // The settled role, sampled at the act. Which material won is not the
                     // claim (market value decides that fresh pick); the claim is that it
-                    // never changes afterwards.
+                    // never changes afterwards, while the poll churns the inventory order.
                     meleeRoleAtSettle = Mem(dockie).PreferredMeleeWeapon;
-                    // Reorder the inventory the way play constantly does: pull one copy
-                    // out and append it, flipping enumeration order.
-                    ThingWithComps g = dockie.inventory.innerContainer.OfType<ThingWithComps>()
-                        .FirstOrDefault(t => t.def == gladius);
-                    if (g != null)
-                    {
-                        dockie.inventory.innerContainer.Remove(g);
-                        dockie.inventory.innerContainer.TryAdd(g);
-                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
-                    }
-                    ForceReconcile(dockie);
                 },
                 checks =
                 {
