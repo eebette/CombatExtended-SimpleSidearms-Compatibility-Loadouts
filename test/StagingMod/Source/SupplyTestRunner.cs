@@ -801,6 +801,7 @@ namespace CESupplyTestStaging
             bool sniperWasExcludedAtDrop = false;
             ThingDefStuffDefPair? meleeRoleAtSettle = null;
             bool featureOffHadClaims = false;
+            bool forceWithdrewExclusion = false;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -2334,6 +2335,80 @@ namespace CESupplyTestStaging
                     C("the-flag-was-armed-for-every-other-save", () =>
                     {
                         return (featureOffArmedTheFlag, $"releasePending={featureOffArmedTheFlag}");
+                    }),
+                }
+            });
+
+            // The drafted branch of clicking an unremembered weapon in the gizmo calls
+            // SetWeaponAsForced, not InformOfAddedSidearm — so before the fix, a drafted
+            // player clicking an excluded weapon back into use got the force and KEPT the
+            // exclusion, which then outlived the force. Forcing is the strongest player
+            // statement there is; it withdraws the exclusion.
+            phases.Add(new Phase
+            {
+                label = "forcing-an-excluded-weapon-while-drafted-withdraws-the-exclusion",
+                deadlineTicks = 4000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    ThingDefStuffDefPair? pr = rec?.dontEquip.FirstOrDefault(x => x.thing == pistol);
+                    if (pr.HasValue && pr.Value.thing != null)
+                    {
+                        InGizmo(() => Mem(dockie).SetWeaponAsForced(pr.Value, drafted: true));
+                        forceWithdrewExclusion = rec != null && !rec.dontEquip.Any(x => x.thing == pistol);
+                    }
+                    // The force itself is scaffolding for this phase, not its claim; a
+                    // lingering drafted-force would leak into every later phase's Apply.
+                    Mem(dockie).ForcedWeaponWhileDrafted = null;
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    P("pistol-was-excluded-first", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(x => x.thing == pistol);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    C("the-force-withdrew-the-exclusion", () =>
+                    {
+                        return (forceWithdrewExclusion, $"withdrawn at force={forceWithdrewExclusion}");
+                    }),
+                }
+            });
+
+            // A role is a stronger statement than a claim: SS equips the default ranged
+            // weapon unconditionally, skipping every filter its own picker applies. A
+            // loadout listing an EMP weapon first must still hand the role to the first
+            // REAL gun — while the EMP weapon stays claimed (carried per the loadout).
+            phases.Add(new Phase
+            {
+                label = "an-emp-weapon-is-never-handed-a-role",
+                deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, D("Weapon_GrenadeEMP"), pistol),
+                mutate = () =>
+                {
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("the-role-skips-the-emp-weapon", () =>
+                    {
+                        var role = Mem(dockie).DefaultRangedWeapon;
+                        return (role?.thing == pistol,
+                                $"default ranged={role?.thing?.defName ?? "none"}");
+                    }),
+                    C("the-emp-weapon-is-still-claimed", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claimed = rec != null && rec.claimed.Any(x => x.thing == D("Weapon_GrenadeEMP"));
+                        return (claimed, $"claimed={claimed}");
                     }),
                 }
             });

@@ -340,6 +340,28 @@ namespace CESidearmsSupply.Patches
             {
                 return;
             }
+            // A role is a stronger statement than a claim: SS equips the default ranged
+            // weapon UNCONDITIONALLY, skipping every filter its own picker applies. So a
+            // pair may be claimed (carried per the loadout) yet ineligible for a role —
+            // tools, manual-use weapons, incendiary/building-destroyers, EMP — or SS will
+            // draft-equip a fire extinguisher. Composed from SS's own public predicates,
+            // so its policy changes follow automatically.
+            var roleEligible = new HashSet<ThingDefStuffDefPair>();
+            foreach (ThingWithComps weapon in pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true))
+            {
+                if (weapon?.def == null)
+                {
+                    continue;
+                }
+                ThingDefStuffDefPair pair = weapon.toThingDefStuffDefPair();
+                if (!target.Contains(pair) || roleEligible.Contains(pair) || pair.isToolNotWeapon()
+                    || GettersFilters.isManualUse(weapon) || GettersFilters.isDangerousWeapon(weapon)
+                    || GettersFilters.isEMPWeapon(weapon))
+                {
+                    continue;
+                }
+                roleEligible.Add(pair);
+            }
             // SS's setters only clear a forced weapon of their own category, so a forced
             // melee weapon is no reason to abandon the ranged default.
             bool forcedRanged = forced.HasValue && (forced.Value.thing?.IsRangedWeapon ?? false);
@@ -348,7 +370,7 @@ namespace CESidearmsSupply.Patches
             if (!forcedRanged && !rec.rangedRoleVetoed
                 && !PlayersAndInHand(pawn, memory.DefaultRangedWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, memory.DefaultRangedWeapon,
+                ThingDefStuffDefPair? pick = First(declared, roleEligible, memory.DefaultRangedWeapon,
                                                    d => d.IsRangedWeapon);
                 if (pick.HasValue && memory.DefaultRangedWeapon != pick)
                 {
@@ -362,7 +384,7 @@ namespace CESidearmsSupply.Patches
             }
             if (!PlayersAndInHand(pawn, memory.PreferredMeleeWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, memory.PreferredMeleeWeapon,
+                ThingDefStuffDefPair? pick = First(declared, roleEligible, memory.PreferredMeleeWeapon,
                                                    d => d.IsMeleeWeapon);
                 if (pick.HasValue && memory.PreferredMeleeWeapon != pick)
                 {
@@ -388,13 +410,13 @@ namespace CESidearmsSupply.Patches
         /// choosing among copies of a pair — then stuff name for determinism.
         /// </summary>
         private static ThingDefStuffDefPair? First(List<ThingDef> declared,
-                                                   HashSet<ThingDefStuffDefPair> target,
+                                                   HashSet<ThingDefStuffDefPair> eligible,
                                                    ThingDefStuffDefPair? currentRole,
                                                    Func<ThingDef, bool> category)
         {
             foreach (ThingDef def in declared.Where(category))
             {
-                List<ThingDefStuffDefPair> candidates = target.Where(p => p.thing == def).ToList();
+                List<ThingDefStuffDefPair> candidates = eligible.Where(p => p.thing == def).ToList();
                 if (candidates.Count == 0)
                 {
                     continue;

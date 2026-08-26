@@ -163,9 +163,16 @@ namespace CESidearmsSupply.Patches
             {
                 rec.dontEquip.Add(weaponMemory);
             }
-            // Pair-level, matching how the claim was recorded: a different material of the
-            // same def may be the player's own and is not ours to disown.
-            rec.claimed.RemoveAll(p => p == weaponMemory);
+            // ONE occurrence, matching what SS itself just did: ForgetSidearmMemory
+            // removes a single entry, and the ledgers must agree entry for entry. (Today
+            // rec.claimed never holds duplicates, so this equals the old RemoveAll — the
+            // one-for-one shape is kept so a future multiplicity change cannot silently
+            // desynchronise the two lists.)
+            int i = rec.claimed.IndexOf(weaponMemory);
+            if (i >= 0)
+            {
+                rec.claimed.RemoveAt(i);
+            }
         }
     }
 
@@ -363,6 +370,89 @@ namespace CESidearmsSupply.Patches
                 cantReason = "excluded from " + pawn.LabelShort + "'s sidearm rotation";
             }
         }
+    }
+
+    /// <summary>
+    /// Forcing a weapon is the strongest statement of intent the gizmo offers, and the
+    /// DRAFTED branch of clicking an unremembered weapon goes through here rather than
+    /// InformOfAddedSidearm — so without this, a drafted player clicking an excluded
+    /// weapon back into use got the force and kept the exclusion, which then outlived
+    /// the force (undraft clears the force, nothing cleared the exclusion).
+    /// </summary>
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetWeaponAsForced),
+                  new[] { typeof(ThingDefStuffDefPair), typeof(bool) })]
+    public static class CompSidearmMemory_SetWeaponAsForced_Patch
+    {
+        public static bool Prepare() => PlayerIntent.Require("SetWeaponAsForced",
+            new[] { typeof(ThingDefStuffDefPair), typeof(bool) },
+            "forcing an excluded weapon while drafted will not withdraw its exclusion.");
+
+        [HarmonyPostfix]
+        public static void Postfix(CompSidearmMemory __instance, ThingDefStuffDefPair weapon)
+        {
+            if (!PlayerIntent.PlayerIsDriving || weapon.thing == null
+                || !PlayerIntent.ManagedPawn(__instance?.Owner))
+            {
+                return;
+            }
+            PlayerIntent.RecordFor(__instance)?.dontEquip.Remove(weapon);
+        }
+    }
+
+    /// <summary>
+    /// The caravan gear tab is the one Equip surface a caravan pawn has, and caravan
+    /// items live in pawn inventories — so the inventory-side veto refused a player
+    /// dragging an excluded weapon onto a pawn, with no way to withdraw the exclusion
+    /// until the caravan landed. Same pair of moves as CE's inventory tab: the veto
+    /// stands down while the player's own gesture runs, and a successful equip
+    /// withdraws the exclusion.
+    ///
+    /// The dragged item is captured in the prefix: the method nulls its field on every
+    /// path. Off the map the SS memory comp is usually unresolvable, so the re-remember
+    /// half is best-effort — the reconcile claims the pair as soon as the pawn spawns
+    /// again, declared and carried.
+    /// </summary>
+    [HarmonyPatch(typeof(RimWorld.Planet.WITab_Caravan_Gear), "TryEquipDraggedItem",
+                  new[] { typeof(Pawn) })]
+    public static class WITab_Caravan_Gear_TryEquipDraggedItem_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(RimWorld.Planet.WITab_Caravan_Gear), "TryEquipDraggedItem",
+                                   new[] { typeof(Pawn) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] WITab_Caravan_Gear.TryEquipDraggedItem not found — "
+                      + "equipping an excluded weapon from the caravan gear tab will be refused. "
+                      + "RimWorld probably moved it.");
+            return false;
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(Thing ___draggedItem, out Thing __state)
+        {
+            PlayerIntent.EnterChoice();
+            __state = ___draggedItem;
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(Pawn p, Thing __state)
+        {
+            if (!(__state is ThingWithComps eq) || eq.def == null || p == null
+                || p.equipment?.Primary != eq)
+            {
+                return;
+            }
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(p);
+            if (rec != null && rec.dontEquip.Remove(new ThingDefStuffDefPair(eq.def, eq.Stuff)))
+            {
+                CompSidearmMemory.GetMemoryCompForPawn(p)?.InformOfAddedPrimary(eq);
+            }
+        }
+
+        [HarmonyFinalizer]
+        public static void Finalizer() => PlayerIntent.ExitChoice();
     }
 
     /// <summary>
