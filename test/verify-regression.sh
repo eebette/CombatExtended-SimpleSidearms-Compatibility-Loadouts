@@ -56,11 +56,12 @@ else
 fi
 trap restore EXIT
 
-build; run
-A=$(phase_state)
+A_STATE=absent
+if build && run; then :; fi
+A=$(phase_state || echo absent)
 restore; trap - EXIT
-# The A leg built the mod from the reverted source; put the real build back even on
-# the rejection paths, or the tree is left with a stale DLL that poisons the next build.
+# The A leg built the mod from the reverted source; rebuild on EVERY path out —
+# including a crashed run — or the tree keeps a stale DLL that poisons the next build.
 build
 
 case "$A" in
@@ -70,11 +71,18 @@ case "$A" in
     *)       echo "!! A: phase '$PHASE' not found in results" >&2; exit 1 ;;
 esac
 
-echo "== B: fix restored, expecting the suite to pass =="
+echo "== B: fix restored, expecting the WHOLE suite to pass =="
 run
 if [[ "$(phase_state)" != "passed" ]]; then
     echo "!! B: '$PHASE' is $(phase_state) with the fix in place" >&2
     exit 1
 fi
-echo "   B: passed"
+# The named phase passing is not the promise — the suite is. verdict.py sets the
+# exit code from the whole result, unreached phases included.
+if ! "$(dirname "$0")/verdict.py" "$RESULT" >/dev/null; then
+    "$(dirname "$0")/verdict.py" "$RESULT" || true
+    echo "!! B: the suite does not pass with the fix in place" >&2
+    exit 1
+fi
+echo "   B: suite passed"
 echo "== verified: '$PHASE' fails without the fix and passes with it =="

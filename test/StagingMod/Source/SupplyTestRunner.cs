@@ -1,3 +1,4 @@
+using HarmonyLib;
 using PeteTimesSix.SimpleSidearms.Utilities;
 using System;
 using System.Collections.Generic;
@@ -81,6 +82,11 @@ namespace CESupplyTestStaging
             // Phase cannot complete before this. The observation window a negative check has
             // to hold across, and the settle time for informational checks.
             public int minTicks;
+            // Runs on every poll after the act. Without it a negative check's window is
+            // passive — at the measured 0.79 reconciles per colonist per 1000 ticks, a
+            // 600-tick window sees under one natural reconcile, so "holds for the window"
+            // was mostly "nothing ran during the window".
+            public Action poll;
             public bool failed;
             public bool invalid;   // a precondition never held; the phase proved nothing
             // mutate is deferred until every precondition holds. Firing it immediately after
@@ -316,6 +322,18 @@ namespace CESupplyTestStaging
                     {
                         allPass = false;
                     }
+                }
+            }
+
+            if (phase.mutated)
+            {
+                try
+                {
+                    phase.poll?.Invoke();
+                }
+                catch (Exception e)
+                {
+                    Log.Error($"[SupplyTest] poll for '{phase.label}' threw: " + e);
                 }
             }
 
@@ -665,6 +683,28 @@ namespace CESupplyTestStaging
                 }
             }
 
+            // Reconcile the inventory to the spec in BOTH directions: the sequenced run
+            // accumulates weapons earlier phases created (a revolver, an SMG), and leaving
+            // them made the two suites run measurably different worlds. Undeclared primary
+            // included.
+            foreach (ThingWithComps extra in pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                         .Where(w => !rows.Contains(w.def)).ToList())
+            {
+                if (pawn.equipment?.Primary == extra)
+                {
+                    pawn.equipment.Remove(extra);
+                }
+                else
+                {
+                    pawn.inventory.innerContainer.Remove(extra);
+                }
+                extra.Destroy();
+            }
+            // The direct container writes above and in the possession block bypass CE's
+            // bookkeeping; its cached bulk/weight and weapon lists feed everything the
+            // phases observe.
+            pawn.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+
             // The vetoes above were written through the same methods the intent hooks watch,
             // so clear the record once more after the fact.
             if (rec != null)
@@ -749,6 +789,7 @@ namespace CESupplyTestStaging
             bool pistolWasReleased = false;
             bool pistolWasExcluded = false;
             ThingWithComps droppedPistol = null;
+            int illegalClaimCount = -1;
 
             var phases = new List<Phase>();
 
@@ -1178,7 +1219,14 @@ namespace CESupplyTestStaging
             {
                 label = "re-remembering-resumes-management",
                 deadlineTicks = 6000,
-                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                // The withdrawal under test needs an exclusion to withdraw. The old arrange
+                // wiped it (Baseline clears the record), so the hook being tested could be
+                // deleted with the phase staying green.
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
                 mutate = () =>
                 {
                     ThingWithComps carriedPistol = dockie.inventory.innerContainer.OfType<ThingWithComps>()
@@ -1193,6 +1241,12 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
+                    P("pistol-starts-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
+                        return (excluded, $"excluded={excluded}");
+                    }),
                     C("suppression-cleared", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
@@ -1214,7 +1268,27 @@ namespace CESupplyTestStaging
                 label = "equipping-something-else-does-not-suppress-a-declared-weapon",
                 deadlineTicks = 6000,
                 minTicks = 300,
-                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    // Pin the primary. SS forgets whatever the OUTGOING primary is; the runs'
+                    // state dumps showed it was the gladius, so the old phase forgot the
+                    // gladius and asserted about the untouched sniper — deleting the fix
+                    // under test left it green.
+                    ThingWithComps sn = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == sniper);
+                    if (sn != null && dockie.equipment?.Primary != sn)
+                    {
+                        if (dockie.equipment.Primary != null)
+                        {
+                            ThingWithComps old = dockie.equipment.Primary;
+                            dockie.equipment.Remove(old);
+                            dockie.inventory.innerContainer.TryAdd(old, true);
+                        }
+                        dockie.inventory.innerContainer.Remove(sn);
+                        dockie.equipment.AddEquipment(sn);
+                    }
+                },
                 mutate = () =>
                 {
                     ThingWithComps outgoing = dockie.equipment?.Primary;
@@ -1233,11 +1307,18 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
-                    N("sniper-never-recorded-as-player-forgotten", () =>
+                    P("sniper-is-primary", () =>
                     {
+                        bool ok = dockie.equipment?.Primary?.def == sniper;
+                        return (ok, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                    }),
+                    N("nothing-recorded-as-player-intent", () =>
+                    {
+                        // Empty, not merely sniper-free: the defect fires on whatever the
+                        // outgoing primary was, and asserting one def let it hide.
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == sniper);
-                        return (!excluded, $"sniper in dontEquip={excluded}");
+                        int n = rec?.dontEquip.Count ?? 0;
+                        return (n == 0, $"dontEquip has {n} entr(y/ies)");
                     }),
                     C("sniper-reclaimed", () =>
                     {
@@ -1554,30 +1635,26 @@ namespace CESupplyTestStaging
             });
 
 
-            // The machine-equip veto (#37). An excluded weapon is refused through
-            // EquipmentUtility.CanEquip — the registry CE consults at every site that arms a
-            // pawn autonomously — and offered normally while the player's own Equip option is
-            // built. Both halves pinned at the exact API the callers use, because the
-            // behavioural version (waiting for CE to re-arm from inventory) depends on which
-            // CE path fires in-window and would test its timing, not our veto.
+            // The exclusion versus CE's automatic re-arm (#37). The old version of this
+            // phase could not reach the mechanism: the staged loadout is ad-hoc, and CE's
+            // primary-swap branch never fires on an ad-hoc loadout because GetSlotsFor
+            // synthesises a slot for whatever the current primary is. adHoc is switched off
+            // here so CE's re-arm logic genuinely runs — and the phase requires the pawn to
+            // actually re-arm, so "nothing happened" cannot pass as "correctly refused".
             phases.Add(new Phase
             {
                 label = "a-suppressed-weapon-is-refused-to-the-machine-and-offered-to-the-player",
-                deadlineTicks = 12000,
+                deadlineTicks = 20000,
                 minTicks = 600,
-                // The exclusion is CONTEXT for this phase, not its act — it belongs in
-                // arrange, or the preconditions that require it can never hold and the
-                // lifecycle correctly refuses to fire the mutate. The first draft had it in
-                // mutate and VOIDed itself; the harness catching its own author again.
+                poll = () => ForceReconcile(dockie),
                 arrange = () =>
                 {
                     Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    loadout.adHoc = false;
                     PlayerForgets(dockie, pistol);
                 },
                 mutate = () =>
                 {
-                    // The act: take the primary away so the game's re-arm logic is live in
-                    // the window; the negative below holds whichever CE path fires.
                     dockie.equipment.DestroyAllEquipment();
                 },
                 checks =
@@ -1608,7 +1685,15 @@ namespace CESupplyTestStaging
                             .FirstOrDefault(w => w.def == pistol);
                         if (t == null) { return (false, "pistol not found"); }
                         bool ok = InChoice(() => EquipmentUtility.CanEquip(t, dockie, out string _));
-                        return (ok, $"CanEquip(inside the player's option build)={ok}");
+                        return (ok, $"CanEquip(inside the tab's menu build)={ok}");
+                    }),
+                    C("the-pawn-did-re-arm", () =>
+                    {
+                        // Without this, "the pistol never became primary" passes just as
+                        // well when nothing re-armed at all — which is exactly how the old
+                        // phase passed in the isolated run (primary=none for the window).
+                        bool armed = dockie.equipment?.Primary != null;
+                        return (armed, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
                     }),
                     N("pistol-never-becomes-primary", () =>
                     {
@@ -1674,6 +1759,280 @@ namespace CESupplyTestStaging
                     {
                         bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
                         return (remembered, $"remembered={remembered}");
+                    }),
+                }
+            });
+
+
+            // The proof for the main fix of this round: the exclusion gesture drops the
+            // weapon (SS's cascade), and CE must still haul it back for the still-declared
+            // row. On the pre-fix code the CanEquip patch refused CE's pickup search and the
+            // weapon rotted on the ground with the row permanently unsatisfiable.
+            phases.Add(new Phase
+            {
+                label = "an-excluded-weapon-is-still-hauled-back",
+                deadlineTicks = 25000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    ThingWithComps t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == shotgun);
+                    if (t != null)
+                    {
+                        // The REAL removal gesture: SS's carried-weapon branch, which drops
+                        // the weapon before forgetting it.
+                        InGizmo(() => WeaponAssingment.DropSidearm(dockie, t,
+                            intentionalDrop: true, unmemorise: true));
+                        ForceReconcile(dockie);
+                    }
+                },
+                mutate = () => { },
+                checks =
+                {
+                    P("shotgun-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == shotgun);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    P("shotgun-on-the-ground", () =>
+                    {
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == shotgun);
+                        return (!carried, $"carried={carried}");
+                    }),
+                    C("ce-hauls-it-back", () =>
+                    {
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == shotgun);
+                        return (carried, $"carried again={carried}");
+                    }),
+                    N("and-it-is-never-re-claimed", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == shotgun);
+                        return (!claimed, $"re-claimed={claimed}");
+                    }),
+                }
+            });
+
+            // The other half of the design's asymmetry, previously untested: a MACHINE
+            // equip must not clear an exclusion. The player half (a playerForced job
+            // clearing it) is phase 20.
+            phases.Add(new Phase
+            {
+                label = "a-machine-equip-does-not-clear-the-exclusion",
+                deadlineTicks = 15000,
+                minTicks = 600,
+                poll = () => ForceReconcile(dockie),
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    ThingWithComps t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == pistol);
+                    if (t != null)
+                    {
+                        dockie.inventory.innerContainer.TryDrop(t, dockie.Position, dockie.Map,
+                            ThingPlaceMode.Near, out Thing dropped);
+                        if (dropped is ThingWithComps ground)
+                        {
+                            // A non-player equip: StartJob, not TryTakeOrderedJob, so
+                            // playerForced stays false — the shape of any mod- or
+                            // game-issued equip.
+                            dockie.jobs.StartJob(JobMaker.MakeJob(JobDefOf.Equip, ground),
+                                Verse.AI.JobCondition.InterruptForced);
+                        }
+                    }
+                },
+                checks =
+                {
+                    P("pistol-was-excluded-first", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    N("exclusion-survives-the-machine-equip", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (excluded, $"still excluded={excluded}");
+                    }),
+                }
+            });
+
+            // The tab path (#37 follow-up): equipping an excluded weapon from CE's
+            // inventory tab clears the exclusion and lands in the identical end state as
+            // the map menu — equipped, remembered, role set — immediately, no reconcile.
+            phases.Add(new Phase
+            {
+                label = "equipping-from-the-inventory-tab-clears-the-exclusion",
+                deadlineTicks = 8000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    ThingWithComps t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .FirstOrDefault(w => w.def == pistol);
+                    var inv = dockie.TryGetComp<CombatExtended.CompInventory>();
+                    if (t != null && inv != null)
+                    {
+                        // The tab menu's click action, via its (player-only) synced wrapper.
+                        AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "SyncedTrySwitchToWeapon")
+                            .Invoke(null, new object[] { inv, t });
+                    }
+                },
+                checks =
+                {
+                    P("pistol-starts-excluded-and-carried", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == pistol);
+                        return (excluded && carried, $"excluded={excluded} carried={carried}");
+                    }),
+                    C("pistol-is-primary", () =>
+                    {
+                        bool ok = dockie.equipment?.Primary?.def == pistol;
+                        return (ok, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                    }),
+                    C("exclusion-cleared", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (!excluded, $"still excluded={excluded}");
+                    }),
+                    C("remembered-with-role-immediately", () =>
+                    {
+                        bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
+                        bool role = Mem(dockie).DefaultRangedWeapon?.thing == pistol;
+                        return (remembered && role, $"remembered={remembered} defaultRanged={role}");
+                    }),
+                }
+            });
+
+            // Release() hands back claims and nothing else.
+            phases.Add(new Phase
+            {
+                label = "release-returns-claims-and-keeps-exclusions",
+                deadlineTicks = 6000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () => CESidearmsSupply.SupplyMod.Release(),
+                checks =
+                {
+                    P("claims-and-an-exclusion-exist", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claims = rec != null && rec.claimed.Count > 0;
+                        bool excl = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (claims && excl, $"claims={rec?.claimed.Count ?? 0} excluded={excl}");
+                    }),
+                    C("claims-released", () =>
+                    {
+                        // Sampled on the first poll, before a natural reconcile can re-claim.
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        return ((rec?.claimed.Count ?? -1) == 0, $"claims={rec?.claimed.Count}");
+                    }),
+                    C("exclusion-kept", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excl = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (excl, $"excluded={excl}");
+                    }),
+                }
+            });
+
+            // Removing a loadout row releases exactly one memory when a duplicate exists —
+            // the one this module added — and never drains the player's copies.
+            phases.Add(new Phase
+            {
+                label = "removing-a-row-releases-one-memory-not-all-copies",
+                deadlineTicks = 6000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    // A second, player-style memory of the same pair. SS keeps duplicates.
+                    var pair = Mem(dockie).RememberedWeapons.FirstOrDefault(pr => pr.thing == shotgun);
+                    if (pair.thing != null)
+                    {
+                        Mem(dockie).RememberedWeapons.Add(pair);
+                    }
+                },
+                mutate = () =>
+                {
+                    LoadoutSlot slot = SlotOf(shotgun);
+                    if (slot != null)
+                    {
+                        loadout.RemoveSlot(slot);
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    P("two-copies-remembered", () =>
+                    {
+                        int n = Mem(dockie).RememberedWeapons.Count(pr => pr.thing == shotgun);
+                        return (n == 2, $"copies={n}");
+                    }),
+                    C("exactly-one-copy-remains", () =>
+                    {
+                        int n = Mem(dockie).RememberedWeapons.Count(pr => pr.thing == shotgun);
+                        return (n == 1, $"copies={n}");
+                    }),
+                }
+            });
+
+            // The eligibility test in Target() must be able to say no. SS's per-weapon
+            // whitelist (Selection mode, emptied) makes every weapon illegal; nothing may be
+            // claimed under it. Settings restored inside the mutate.
+            phases.Add(new Phase
+            {
+                label = "an-illegal-sidearm-is-never-claimed",
+                deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
+                {
+                    var settings = PeteTimesSix.SimpleSidearms.SimpleSidearms.Settings;
+                    var oldMode = settings.LimitModeSingle;
+                    var oldSel = settings.LimitModeSingle_Selection;
+                    try
+                    {
+                        settings.LimitModeSingle = PeteTimesSix.SimpleSidearms.Utilities.Enums.LimitModeSingleSidearm.Selection;
+                        settings.LimitModeSingle_Selection = new HashSet<ThingDef>();
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        rec.claimed.Clear();
+                        foreach (var pr in Mem(dockie).RememberedWeapons.ToList())
+                        {
+                            Mem(dockie).ForgetSidearmMemory(pr);
+                        }
+                        ForceReconcile(dockie);
+                        illegalClaimCount = rec.claimed.Count
+                                            + Mem(dockie).RememberedWeapons.Count;
+                    }
+                    finally
+                    {
+                        settings.LimitModeSingle = oldMode;
+                        settings.LimitModeSingle_Selection = oldSel;
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("nothing-claimed-while-everything-was-illegal", () =>
+                    {
+                        return (illegalClaimCount == 0, $"claimed+remembered under empty whitelist={illegalClaimCount}");
                     }),
                 }
             });

@@ -66,7 +66,11 @@ hunting a specific stuff the loadout never asked for.
 
 **Forget a declared weapon in SS's gizmo and it stays forgotten** — that is how you say *carry
 this but don't wield it*, which removing the loadout row cannot express (that would stop the
-pawn carrying it at all). Put it back in the list and the loadout manages it again.
+pawn carrying it at all). The game will not arm the pawn with it on its own (the one place
+you can see the block is the inventory tab's Equip entry, which names the reason), but CE
+still hauls it for the loadout row exactly as before. To undo it: equip the weapon yourself
+— from the map right-click menu or the inventory tab — or remove and re-add its loadout row;
+any of those puts it back under loadout management immediately.
 
 Generic slots ("any ranged weapon") are ignored: there is no specific def to remember.
 

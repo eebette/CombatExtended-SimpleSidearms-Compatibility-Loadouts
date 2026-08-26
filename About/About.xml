@@ -10,7 +10,7 @@
 
 - Loadout weapons as sidearms: weapons listed in a CE loadout are automatically remembered as sidearms by assigned pawns. The first declared ranged weapon becomes the default ranged weapon and the first declared melee the preferred melee weapon; the rest are backups. Remove one from the loadout and it is forgotten again, which lets CE clear it out of the inventory.
 - The loadout is the authority: a weapon def it lists is managed by it whoever remembered that weapon first. Defs the loadout never lists are not touched. Forcing a weapon and "prefer unarmed" always outrank it, and a weapon you equip that the loadout does not list keeps the role while the pawn carries it.
-- Forget a declared weapon in the Simple Sidearms gizmo and it stays forgotten - that is how you say "carry this but do not wield it".
+- Forget a declared weapon in the Simple Sidearms gizmo and it stays forgotten - that is how you say "carry this but do not wield it". The pawn still hauls it for the loadout; equipping it yourself puts it back in the rotation.
 - Ammo for sidearms is Combat Extended's own job: add the ammo to the loadout and CE keeps the pawn stocked to that count.
 
 Requires the CombatExtended-SimpleSidearms Compatibility Patch.</description>

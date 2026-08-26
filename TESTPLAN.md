@@ -19,7 +19,7 @@ phase that was never reached is not marked failed — so a run that stopped earl
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, in 17 phases: initial reconcile and physical fetch (memory contents,
+`supply1` covers, currently in 26 phases: initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -27,12 +27,12 @@ an undeclared equipped weapon keeping the role while carried and the loadout tak
 it is stowed, and the gizmo-forget suppression sticking and then resuming when the weapon is
 put back in the list.
 
-The last five phases are the regressions from the 2026-08-23 review: an ordinary equip must
-not be read as a deliberate forget, a forced weapon must survive its row leaving the loadout,
-a declared-but-uncarried weapon must not be remembered with a guessed material, a hand-cleared
-role must stay cleared, and deleting the loadout must not wipe anything. Each is a `negative`
-check — re-evaluated on every poll and failing the phase the moment it trips, rather than
-latching on the first sample.
+Phases 12-15 and 17 are the regressions from the 2026-08-23 review; 16 and 18-20 cover the
+exclusion design (#37); the final six cover the 2026-08-26 review's findings — the
+haul-back guarantee, the machine-equip asymmetry, the inventory-tab path, Release()'s
+scope, duplicate-memory handling, and the eligibility gate. Persistence claims are `N()`
+checks over windows with a `poll` action re-running the reconcile; setup facts are `P()`
+preconditions; one-shot outcomes are `C()`.
 
 ## Benchmark
 
@@ -85,32 +85,13 @@ plus some FMJ rifle ammo rows. Assign loadout.
   gladius; combat mode = ranged (only if it was BySkill before — a hand-set mode must
   survive).
 - Reorder shotgun to top → default ranged flips to shotgun on next reconcile.
-- Manually set pistol as default ranged via gizmo → reorder loadout again → pistol stays
-  default (player override sticks).
+- Manually set pistol as default ranged via gizmo → reorder loadout again → the loadout's
+  first ranged weapon takes the role back (a hand-set role on a DECLARED weapon yields to
+  the loadout; only roles on undeclared carried weapons, vetoes, and forced weapons stick).
 - Remove shotgun from loadout → shotgun forgotten from gizmo. Manually remember shotgun,
   remove and re-add another weapon → manual shotgun memory untouched.
 - Melee stuff fix-up: loadout lists gladius, pawn picks up a *plasteel* gladius → memory pair
   retargets to plasteel variant on next reconcile (gizmo tooltip shows the carried one).
-
-## Ammo sustainment
-
-Scope rule: ammo derivation rides CE's own per-loadout "Ad hoc" checkbox (vanilla CE uses
-it to auto-supply the equipped primary; mod 2 extends it to every weapon DECLARED in that
-loadout, at the loadout's mags count). Ad hoc unticked = pure CE curated contract: weapons
-carried, no ammo, no demand. Incidental/manual memories derive nothing unless the "ammo for
-ALL remembered" opt-in is on. Explicit caliber rows always win per-def.
-
-- The staged loadout has Ad hoc ticked, mags = 2: pawn fetches mags for the LOADOUT-DECLARED
-  guns (Gear tab counts ≈ magSize × 2 per caliber) — except the sniper caliber, whose
-  explicit row of 10 must suppress derivation: exactly 10 carried.
-- UNTICK Ad hoc in the loadout dialog → Rearm → derived demand gone; pawn drops the derived
-  ammo (pure-CE parity check). Re-tick → demand returns.
-- Manually remember an extra gun via gizmo (not in loadout) → NO derived ammo for it even
-  with Ad hoc on. Flip "Ammo for ALL remembered weapons" on → its demand appears next Rearm
-  (at the global spare-magazines count, not the loadout's).
-- Excess-drop check: pawn carrying derived ammo does NOT drop it during loadout enforcement
-  (virtual slots feed GetExcessThing too).
-- CE ammo system disabled in CE settings → no derived ammo demand, no errors.
 
 ## How a phase is built
 
@@ -136,7 +117,7 @@ Five rules, each first paid for as a real failure in this suite:
    fires mid-window while CE fetches.
 2. **Context in arrange, acts in mutate.** mutate waits for the preconditions; a
    precondition that only becomes true inside mutate deadlocks the phase into VOID.
-3. **Arrange reconciles the world to its spec — it does not add to what is there.** Reuse a
+3. **Arrange reconciles the world to its spec in both directions** — it adds what is missing and removes what is extra (Baseline strips undeclared weapons and refreshes CE's inventory caches). Reuse a
    leftover before manufacturing a duplicate, or the mutate removes yours while the
    leftover keeps the behavior alive.
 4. **Assert what this module controls.** "SS never remembers it again" and "CE drops it"
@@ -158,28 +139,21 @@ not a test.
 
 ## Known gaps
 
-- **SS's UI branch dispatch is not exercised.** The intent hooks fire inside a gizmo
-  interaction scope, and the tests enter that scope the way `handleInteraction` does before
-  making the call SS's own branch would make — so the hooks under test are real. Which branch
-  a given click reaches is SS's business and is untested. Confirm by hand: right-click a
-  carried sidearm in the gizmo and check the pawn does not re-acquire it within the minute.
-- **The eligibility predicate has no negative test.** Nothing stages a pawn SS would refuse
-  (slot limit reached, over the per-weapon mass cap, pacifist). Deleting `IsLegalSidearm`
-  would leave the suite green.
-- **No save/load round trip.** `CompLoadoutSidearms.PostExposeData` is untested; `claimed`,
-  `dontEquip` and both role vetoes should survive a reload.
-- **No settings-toggle coverage**, including the deferred release when the feature is
-  switched off with no save loaded.
+- The diagnostics gate cannot see load-time errors: `BaselineDiagnostics()` runs after the
+  save loads, so anything logged during load — including a total patch failure from
+  Bootstrap — is swallowed. The all-patches-applied precondition phase covers the patch
+  half; a load-clean assertion for the rest is still open.
+- `SupplySessionComponent`'s deferred release runs at load, before any phase, so the
+  releasePending path has no in-suite coverage; verified by design review only.
+- Drafted-side state (`ForcedWeaponWhileDrafted`, drafted gizmo branches) has no phase.
+- No full save/load round trip of the comp (out-of-process).
 
 ## Regression
 
 - Pawn with default loadout: zero behavior change, no records created.
 - Save/load mid-state: template records persist.
-- Uninstalling mid-save is not silent. The orphaned GameComponent node produces two red
-  errors at load — "could not find class ... trying to use Verse.GameComponent" and the
-  SaveableFromNode exception behind it — each dumping the component's serialized XML, which
-  on a mature colony is several kilobytes. RimWorld then drops the null and moves on, so it
-  is a one-time cost, but it is not nothing. The save-time prune is what bounds its size.
-  Sidearm memories the mod wrote are left behind as inert SS data; "Release all claimed
-  sidearms" in the settings clears them first if the player uses it before uninstalling.
-- Dev log: no red errors from [Sidearms&Supply]; look for the reconcile WarningOnce.
+- Uninstalling mid-save is quiet: the per-pawn state lives in two `ceSupply_*` nodes on
+  each humanlike pawn, which RimWorld ignores silently when the comp class is absent.
+  Sidearm memories the mod wrote remain as ordinary SS data; "Release all claimed
+  sidearms" before uninstalling clears them.
+- Dev log: no red errors from [Sidearms&Supply]; any [Sidearms&Supply] Log.ErrorOnce is a failure.
