@@ -790,6 +790,8 @@ namespace CESupplyTestStaging
             bool pistolWasExcluded = false;
             ThingWithComps droppedPistol = null;
             int illegalClaimCount = -1;
+            bool tabSwitchEquipped = false;
+            bool tabSwitchRole = false;
 
             var phases = new List<Phase>();
 
@@ -1887,6 +1889,13 @@ namespace CESupplyTestStaging
                         // The tab menu's click action, via its (player-only) synced wrapper.
                         AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "SyncedTrySwitchToWeapon")
                             .Invoke(null, new object[] { inv, t });
+                        // Sampled HERE: primary and role are transients — the next reconcile
+                        // correctly hands the ranged role back to the loadout's first, and
+                        // SS's idle switching then re-arms accordingly. The first version of
+                        // this phase asserted primary at poll time and failed on that
+                        // correct behaviour.
+                        tabSwitchEquipped = dockie.equipment?.Primary?.def == pistol;
+                        tabSwitchRole = Mem(dockie).DefaultRangedWeapon?.thing == pistol;
                     }
                 },
                 checks =
@@ -1899,10 +1908,10 @@ namespace CESupplyTestStaging
                             .Any(w => w.def == pistol);
                         return (excluded && carried, $"excluded={excluded} carried={carried}");
                     }),
-                    C("pistol-is-primary", () =>
+                    C("the-switch-happened", () =>
                     {
-                        bool ok = dockie.equipment?.Primary?.def == pistol;
-                        return (ok, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                        return (tabSwitchEquipped && tabSwitchRole,
+                                $"equipped-at-click={tabSwitchEquipped} role-at-click={tabSwitchRole}");
                     }),
                     C("exclusion-cleared", () =>
                     {
@@ -1910,11 +1919,10 @@ namespace CESupplyTestStaging
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (!excluded, $"still excluded={excluded}");
                     }),
-                    C("remembered-with-role-immediately", () =>
+                    C("remembered-durably", () =>
                     {
                         bool remembered = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
-                        bool role = Mem(dockie).DefaultRangedWeapon?.thing == pistol;
-                        return (remembered && role, $"remembered={remembered} defaultRanged={role}");
+                        return (remembered, $"remembered={remembered}");
                     }),
                 }
             });
@@ -2007,8 +2015,13 @@ namespace CESupplyTestStaging
                     var settings = PeteTimesSix.SimpleSidearms.SimpleSidearms.Settings;
                     var oldMode = settings.LimitModeSingle;
                     var oldSel = settings.LimitModeSingle_Selection;
+                    // isValidSidearm reads LimitModeSingle only when SeparateModes is false;
+                    // SS's default preset sets it true, so without forcing it the knob below
+                    // is inert — which is exactly how this phase first failed.
+                    var oldSeparate = settings.SeparateModes;
                     try
                     {
+                        settings.SeparateModes = false;
                         settings.LimitModeSingle = PeteTimesSix.SimpleSidearms.Utilities.Enums.LimitModeSingleSidearm.Selection;
                         settings.LimitModeSingle_Selection = new HashSet<ThingDef>();
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
@@ -2023,6 +2036,7 @@ namespace CESupplyTestStaging
                     }
                     finally
                     {
+                        settings.SeparateModes = oldSeparate;
                         settings.LimitModeSingle = oldMode;
                         settings.LimitModeSingle_Selection = oldSel;
                     }
