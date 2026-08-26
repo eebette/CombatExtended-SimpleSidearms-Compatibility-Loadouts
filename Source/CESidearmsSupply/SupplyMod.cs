@@ -54,15 +54,18 @@ namespace CESidearmsSupply
 
             // Turning it off has to undo it, not freeze it: the compat patch exempts every
             // remembered weapon from CE's drop, so claims left behind with nobody to release
-            // them pin weapons in inventories with no way back short of the gizmo.
+            // them pin weapons in inventories with no way back short of the gizmo. Release()
+            // itself arms releasePending whenever the feature is off — settings are global
+            // and the sweep is per-colony, so every OTHER save gets its sweep on next load.
             if (was && !Settings.loadoutWeaponsAsSidearms)
             {
-                Release();
+                Release(interactive: true);
             }
             else if (!was && Settings.loadoutWeaponsAsSidearms && Settings.releasePending)
             {
-                // Changed their mind before any save was loaded. Without this the deferred
-                // release fires anyway, on an enabled feature, and wipes their exclusions.
+                // Changed their mind — with no save loaded, or after an off-toggle armed the
+                // flag. Without this the deferred release fires anyway, on an enabled
+                // feature, and wipes their exclusions.
                 Settings.releasePending = false;
                 Settings.Write();
             }
@@ -74,7 +77,7 @@ namespace CESidearmsSupply
                                    + "over. Weapons the loadout does not list are not touched.")
                 && inGame)
             {
-                Release();
+                Release(interactive: true);
             }
             if (!inGame)
             {
@@ -93,7 +96,11 @@ namespace CESidearmsSupply
         /// Hand back every claimed pair on every colonist. Returns false when there is no
         /// game to act on, so the caller can defer.
         /// </summary>
-        public static bool Release()
+        /// <param name="interactive">True for the settings toggle and button: they always
+        /// show the result. The once-per-load sweep passes false, so a colony with nothing
+        /// to release loads without a "Released 0" toast — forever, since the flag
+        /// deliberately never clears while the feature is off.</param>
+        public static bool Release(bool interactive = false)
         {
             if (Current.Game == null)
             {
@@ -102,6 +109,15 @@ namespace CESidearmsSupply
                 Messages.Message("[Sidearms&Supply] No save loaded — claimed sidearms will be released "
                                  + "when you next load one.", MessageTypeDefOf.CautionInput, historical: false);
                 return false;
+            }
+            // Settings are global, the sweep is per-colony. While the feature is off, any
+            // release arms the once-per-load sweep so every other save is cleaned the next
+            // time it is loaded. (With the feature on there is nothing to arm — the
+            // reconcile re-claims on its own cadence.)
+            if (!Settings.loadoutWeaponsAsSidearms && !Settings.releasePending)
+            {
+                Settings.releasePending = true;
+                Settings.Write();
             }
             int released = 0;
             int deferred = 0;
@@ -129,10 +145,20 @@ namespace CESidearmsSupply
             // The flag deliberately survives a successful sweep. It means "the feature is
             // off with unfinished cleanup", and it stays set — releasing on every load, for
             // every save — until the player turns the feature back on. Clearing it after the
-            // first save meant a second colony never got released at all.
-            Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s)."
-                             + (deferred > 0 ? $" {deferred} pawn(s) are away and will be released when they return." : ""),
-                             MessageTypeDefOf.TaskCompletion, historical: false);
+            // first save meant a second colony never got released at all. Away pawns ride
+            // the same flag: their memory comps resolve on the load that brings them back.
+            if (interactive || released > 0 || deferred > 0)
+            {
+                // The "later load" promise is only made when the armed flag actually
+                // delivers it. With the feature on nothing retries — the reconcile
+                // re-claims on its own — so away pawns are reported as skipped instead.
+                string away = deferred == 0 ? ""
+                    : Settings.releasePending
+                        ? $" {deferred} pawn(s) are away; they are released on a later save load."
+                        : $" {deferred} pawn(s) are away and were skipped.";
+                Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s)." + away,
+                                 MessageTypeDefOf.TaskCompletion, historical: false);
+            }
             return true;
         }
     }

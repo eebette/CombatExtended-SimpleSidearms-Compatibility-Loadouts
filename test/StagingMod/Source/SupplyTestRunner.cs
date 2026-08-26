@@ -800,6 +800,9 @@ namespace CESupplyTestStaging
             bool machineEquipLanded = false;
             bool sniperWasExcludedAtDrop = false;
             ThingDefStuffDefPair? meleeRoleAtSettle = null;
+            bool featureOffHadClaims = false;
+            bool featureOffSweptThisColony = false;
+            bool featureOffArmedTheFlag = false;
 
             var phases = new List<Phase>();
 
@@ -1530,13 +1533,27 @@ namespace CESupplyTestStaging
             // Last, because it takes the loadout away.
             phases.Add(new Phase
             {
-                label = "deleting-the-loadout-does-not-wipe-remembered-sidearms",
+                label = "deleting-the-loadout-releases-claims-and-keeps-the-players-own",
                 deadlineTicks = 6000,
                 minTicks = 600,
-                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    // A memory that is the PLAYER's and not a claim: an undeclared,
+                    // uncarried pair. The deletion must release the projection's claims
+                    // (or the compat patch's drop exemption pins those weapons forever)
+                    // while leaving this one alone.
+                    var own = new ThingDefStuffDefPair(revolver, null);
+                    if (!Mem(dockie).RememberedWeapons.Contains(own))
+                    {
+                        Mem(dockie).RememberedWeapons.Add(own);
+                    }
+                },
                 mutate = () =>
                 {
-                    beforeDelete = Mem(dockie).RememberedWeapons.Select(p => p.thing.defName).ToHashSet();
+                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    beforeDelete = (rec?.claimed ?? new List<ThingDefStuffDefPair>())
+                        .Select(pr => pr.thing.defName).ToHashSet();
                     LoadoutManager.RemoveLoadout(loadout);
                     ForceReconcile(dockie);
                     ForceReconcile(dockie);
@@ -1548,16 +1565,25 @@ namespace CESupplyTestStaging
                         Loadout now = dockie.GetLoadout();
                         return (now == null || now.defaultLoadout, $"loadout={now?.label ?? "null"}");
                     }),
-                    N("every-remembered-weapon-survives", () =>
+                    P("there-were-claims-to-release", () =>
                     {
-                        // A count cannot fail here: a forced pair and a hand-added memory
-                        // both survive the wipe this phase is named for. Assert identity.
-                        var now = Mem(dockie).RememberedWeapons.Select(p => p.thing.defName).ToHashSet();
-                        var lost = beforeDelete.Where(d => !now.Contains(d)).ToList();
-                        return (lost.Count == 0,
-                                lost.Count == 0
-                                    ? $"all {beforeDelete.Count} still remembered"
-                                    : "LOST: " + string.Join(",", lost));
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        int n = rec?.claimed.Count ?? 0;
+                        return (n > 0, $"claims={n}");
+                    }),
+                    C("the-claims-are-handed-back", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        int n = rec?.claimed.Count ?? 0;
+                        bool stillRemembered = Mem(dockie).RememberedWeapons
+                            .Any(pr => beforeDelete.Contains(pr.thing.defName));
+                        return (n == 0 && !stillRemembered,
+                                $"claims={n} formerly-claimed still remembered={stillRemembered}");
+                    }),
+                    N("the-players-own-memory-survives", () =>
+                    {
+                        bool kept = Mem(dockie).RememberedWeapons.Any(pr => pr.thing == revolver);
+                        return (kept, $"revolver remembered={kept}");
                     }),
                 }
             });
@@ -2248,6 +2274,56 @@ namespace CESupplyTestStaging
                         bool stable = now == meleeRoleAtSettle;
                         return (stable, $"was={meleeRoleAtSettle?.stuff?.defName ?? "null"} "
                                         + $"now={now?.stuff?.defName ?? "null"}");
+                    }),
+                }
+            });
+
+            // The settings toggle is global; the sweep it triggers is per-colony. Turning
+            // the feature off must sweep the loaded colony AND arm releasePending so every
+            // other save is swept on its next load — the flag was previously armed only in
+            // the no-save-loaded branch, so a second colony kept its claims forever (and
+            // the compat patch's drop exemption pinned those weapons in inventories).
+            phases.Add(new Phase
+            {
+                label = "turning-the-feature-off-sweeps-this-colony-and-arms-the-rest",
+                deadlineTicks = 4000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
+                {
+                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var settings = CESidearmsSupply.SupplyMod.Settings;
+                    bool wasPending = settings.releasePending;
+                    featureOffHadClaims = rec != null && rec.claimed.Count > 0;
+                    try
+                    {
+                        settings.loadoutWeaponsAsSidearms = false;
+                        CESidearmsSupply.SupplyMod.Release(interactive: true);
+                        featureOffSweptThisColony = rec != null && rec.claimed.Count == 0;
+                        featureOffArmedTheFlag = settings.releasePending;
+                    }
+                    finally
+                    {
+                        // Mirror the settings window's re-enable path: turning the feature
+                        // back on clears the pending flag so the deferred sweep does not
+                        // fire on an enabled feature.
+                        settings.loadoutWeaponsAsSidearms = true;
+                        settings.releasePending = wasPending;
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    C("there-were-claims-to-sweep", () =>
+                    {
+                        return (featureOffHadClaims, $"had claims={featureOffHadClaims}");
+                    }),
+                    C("this-colony-was-swept", () =>
+                    {
+                        return (featureOffSweptThisColony, $"swept={featureOffSweptThisColony}");
+                    }),
+                    C("the-flag-was-armed-for-every-other-save", () =>
+                    {
+                        return (featureOffArmedTheFlag, $"releasePending={featureOffArmedTheFlag}");
                     }),
                 }
             });

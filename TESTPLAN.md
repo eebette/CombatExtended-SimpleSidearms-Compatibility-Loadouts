@@ -19,7 +19,7 @@ phase that was never reached is not marked failed — so a run that stopped earl
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, currently in 28 phases: initial reconcile and physical fetch (memory contents,
+`supply1` covers, currently in 29 phases: initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -144,7 +144,9 @@ not a test.
   Bootstrap — is swallowed. The all-patches-applied precondition phase covers the patch
   half; a load-clean assertion for the rest is still open.
 - `SupplySessionComponent`'s deferred release runs at load, before any phase, so the
-  releasePending path has no in-suite coverage; verified by design review only.
+  releasePending's arming is covered (the toggle-off phase asserts the flag is set when
+  the feature goes off in-game); the once-per-load consumer, SupplySessionComponent
+  .FinalizeInit, still has no in-suite coverage — it runs before the runner does.
 - Drafted-side state (`ForcedWeaponWhileDrafted`, drafted gizmo branches) has no phase.
 - No full save/load round trip of the comp (out-of-process).
 
@@ -152,8 +154,12 @@ not a test.
 
 - Pawn with default loadout: zero behavior change, no records created.
 - Save/load mid-state: template records persist.
-- Uninstalling mid-save is quiet: the per-pawn state lives in two `ceSupply_*` nodes on
-  each humanlike pawn, which RimWorld ignores silently when the comp class is absent.
+- Uninstalling mid-save is NOT fully quiet. The per-pawn state (two `ceSupply_*` nodes on
+  each humanlike pawn) is dropped silently when the comp class is absent — but
+  `SupplySessionComponent` is serialized into the save's game-component list by class
+  name, so the first load without the mod logs one red "Could not find class
+  CESidearmsSupply.SupplySessionComponent" error (the node is a single self-closing
+  element; RimWorld discards it and continues, and the save is clean after re-saving).
   Sidearm memories the mod wrote remain as ordinary SS data; "Release all claimed
   sidearms" before uninstalling clears them.
 - Dev log: no red errors from [Sidearms&Supply]; any [Sidearms&Supply] Log.ErrorOnce is a failure.

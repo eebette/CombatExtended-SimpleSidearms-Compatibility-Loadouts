@@ -160,12 +160,20 @@ namespace CESidearmsSupply.Patches
                 return;
             }
 
-            // No loadout means NO OPINION, not "declares nothing". CE reassigns every pawn of
-            // a deleted loadout to the default one by writing its dictionary directly, and
-            // deleting a loadout is an unconfirmed float-menu click.
+            // No loadout means NO OPINION about what to claim — but claims already made
+            // still belong to this projection, and CE reassigns every pawn of a deleted
+            // loadout to the default one on an unconfirmed float-menu click. Without the
+            // release here, those claims survived with nobody to release them, and the
+            // compat patch's drop exemption then pinned the weapons in every pawn's
+            // inventory forever. The player's own memories, exclusions and role vetoes are
+            // not claims and survive untouched.
             Loadout loadout = pawn.GetLoadout();
             if (loadout == null || loadout.defaultLoadout)
             {
+                if (rec.claimed.Count > 0)
+                {
+                    rec.Release(memory, memory.ForcedWeapon, memory.ForcedWeaponWhileDrafted);
+                }
                 return;
             }
 
