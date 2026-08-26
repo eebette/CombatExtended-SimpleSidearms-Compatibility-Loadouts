@@ -792,6 +792,8 @@ namespace CESupplyTestStaging
             int illegalClaimCount = -1;
             bool tabSwitchEquipped = false;
             bool tabSwitchRole = false;
+            bool sniperWasPrimaryAtEquip = false;
+            bool shotgunWasDropped = false;
 
             var phases = new List<Phase>();
 
@@ -1270,29 +1272,26 @@ namespace CESupplyTestStaging
                 label = "equipping-something-else-does-not-suppress-a-declared-weapon",
                 deadlineTicks = 6000,
                 minTicks = 300,
-                arrange = () =>
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
                 {
-                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
-                    // Pin the primary. SS forgets whatever the OUTGOING primary is; the runs'
-                    // state dumps showed it was the gladius, so the old phase forgot the
-                    // gladius and asserted about the untouched sniper — deleting the fix
-                    // under test left it green.
+                    // Pinning the primary is part of the ACT, done and sampled here: done in
+                    // arrange it raced SS's idle switching, which legitimately re-arms the
+                    // pawn within a few ticks and VOIDed the phase in isolation.
                     ThingWithComps sn = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                         .FirstOrDefault(w => w.def == sniper);
                     if (sn != null && dockie.equipment?.Primary != sn)
                     {
                         if (dockie.equipment.Primary != null)
                         {
-                            ThingWithComps old = dockie.equipment.Primary;
-                            dockie.equipment.Remove(old);
-                            dockie.inventory.innerContainer.TryAdd(old, true);
+                            ThingWithComps prev = dockie.equipment.Primary;
+                            dockie.equipment.Remove(prev);
+                            dockie.inventory.innerContainer.TryAdd(prev, true);
                         }
                         dockie.inventory.innerContainer.Remove(sn);
                         dockie.equipment.AddEquipment(sn);
                     }
-                },
-                mutate = () =>
-                {
+                    sniperWasPrimaryAtEquip = dockie.equipment?.Primary?.def == sniper;
                     ThingWithComps outgoing = dockie.equipment?.Primary;
                     var other = (ThingWithComps)ThingMaker.MakeThing(revolver);
                     GenPlace.TryPlaceThing(other, dockie.Position, dockie.Map, ThingPlaceMode.Near);
@@ -1309,10 +1308,9 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
-                    P("sniper-is-primary", () =>
+                    C("sniper-was-primary-at-the-equip", () =>
                     {
-                        bool ok = dockie.equipment?.Primary?.def == sniper;
-                        return (ok, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                        return (sniperWasPrimaryAtEquip, $"pinned={sniperWasPrimaryAtEquip}");
                     }),
                     N("nothing-recorded-as-player-intent", () =>
                     {
@@ -1774,34 +1772,36 @@ namespace CESupplyTestStaging
             {
                 label = "an-excluded-weapon-is-still-hauled-back",
                 deadlineTicks = 25000,
-                arrange = () =>
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
                 {
-                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
                     ThingWithComps t = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                         .FirstOrDefault(w => w.def == shotgun);
                     if (t != null)
                     {
                         // The REAL removal gesture: SS's carried-weapon branch, which drops
-                        // the weapon before forgetting it.
+                        // the weapon before forgetting it. "On the ground" is sampled HERE:
+                        // it is momentary by design — the fixed CE re-hauls a drop landing at
+                        // the pawn's feet within ticks, so a precondition on it races the
+                        // exact behaviour this phase proves.
                         InGizmo(() => WeaponAssingment.DropSidearm(dockie, t,
                             intentionalDrop: true, unmemorise: true));
+                        shotgunWasDropped = !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == shotgun);
                         ForceReconcile(dockie);
                     }
                 },
-                mutate = () => { },
                 checks =
                 {
-                    P("shotgun-excluded", () =>
+                    C("shotgun-excluded", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == shotgun);
                         return (excluded, $"excluded={excluded}");
                     }),
-                    P("shotgun-on-the-ground", () =>
+                    C("shotgun-was-dropped", () =>
                     {
-                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                            .Any(w => w.def == shotgun);
-                        return (!carried, $"carried={carried}");
+                        return (shotgunWasDropped, $"dropped={shotgunWasDropped}");
                     }),
                     C("ce-hauls-it-back", () =>
                     {
