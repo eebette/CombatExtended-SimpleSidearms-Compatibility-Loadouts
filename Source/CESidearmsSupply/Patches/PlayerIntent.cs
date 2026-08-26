@@ -1,6 +1,7 @@
 using System;
 using HarmonyLib;
 using UnityEngine;
+using CombatExtended;
 using RimWorld;
 using SimpleSidearms.rimworld;
 using Verse;
@@ -60,6 +61,23 @@ namespace CESidearmsSupply.Patches
             }
         }
 
+        /// <summary>
+        /// The one gate recording and blocking share, matching the cleanup's own conditions:
+        /// the feature is on and the pawn has a real (non-default) loadout. A colony that
+        /// never uses CE loadouts is never touched by the exclusion system, and switching
+        /// the feature off switches all of it off — the cleanup in Reconcile only runs under
+        /// these same conditions, so nothing is ever recorded that nothing can remove.
+        /// </summary>
+        internal static bool ManagedPawn(Pawn pawn)
+        {
+            if (pawn == null || !pawn.IsColonist || !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+            {
+                return false;
+            }
+            Loadout loadout = Utility_Loadouts.GetLoadout(pawn);
+            return loadout != null && !loadout.defaultLoadout;
+        }
+
         internal static CompLoadoutSidearms RecordFor(CompSidearmMemory memory)
         {
             Pawn pawn = memory?.Owner;
@@ -90,7 +108,8 @@ namespace CESidearmsSupply.Patches
     /// The scope. A finalizer rather than a postfix: finalizers run even when the original
     /// throws, and a leaked depth would silently disable every hook below for the session.
     /// </summary>
-    [HarmonyPatch(typeof(Gizmo_SidearmsList), nameof(Gizmo_SidearmsList.handleInteraction))]
+    [HarmonyPatch(typeof(Gizmo_SidearmsList), nameof(Gizmo_SidearmsList.handleInteraction),
+                  new[] { typeof(Gizmo_SidearmsList.SidearmsListInteraction), typeof(Event) })]
     public static class Gizmo_SidearmsList_handleInteraction_Patch
     {
         public static bool Prepare()
@@ -114,7 +133,8 @@ namespace CESidearmsSupply.Patches
     }
 
     /// <summary>Inside the gizmo, a forget is the player saying "carry it, do not wield it".</summary>
-    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.ForgetSidearmMemory))]
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.ForgetSidearmMemory),
+                  new[] { typeof(ThingDefStuffDefPair) })]
     public static class CompSidearmMemory_ForgetSidearmMemory_Patch
     {
         public static bool Prepare() => PlayerIntent.Require("ForgetSidearmMemory",
@@ -123,7 +143,8 @@ namespace CESidearmsSupply.Patches
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance, ThingDefStuffDefPair weaponMemory)
         {
-            if (!PlayerIntent.PlayerIsDriving || weaponMemory.thing == null)
+            if (!PlayerIntent.PlayerIsDriving || weaponMemory.thing == null
+                || !PlayerIntent.ManagedPawn(__instance?.Owner))
             {
                 return;
             }
@@ -155,7 +176,8 @@ namespace CESidearmsSupply.Patches
     /// for is silent and permanent; lifting one they did not ask for costs a single click to
     /// re-express. The asymmetry is the point.
     /// </summary>
-    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.InformOfAddedSidearm))]
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.InformOfAddedSidearm),
+                  new[] { typeof(Thing) })]
     public static class CompSidearmMemory_InformOfAddedSidearm_Patch
     {
         public static bool Prepare() => PlayerIntent.Require("InformOfAddedSidearm",
@@ -179,7 +201,7 @@ namespace CESidearmsSupply.Patches
         }
     }
 
-    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetRangedWeaponDefault))]
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetRangedWeaponDefault), new Type[0])]
     public static class CompSidearmMemory_UnsetRangedWeaponDefault_Patch
     {
         public static bool Prepare() => PlayerIntent.Require("UnsetRangedWeaponDefault",
@@ -188,7 +210,7 @@ namespace CESidearmsSupply.Patches
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance)
         {
-            if (!PlayerIntent.PlayerIsDriving)
+            if (!PlayerIntent.PlayerIsDriving || !PlayerIntent.ManagedPawn(__instance?.Owner))
             {
                 return;
             }
@@ -205,7 +227,7 @@ namespace CESidearmsSupply.Patches
     /// icon to mean "stop preferring unarmed", which is not a statement about melee weapons
     /// at all — so only treat it as a veto if there was a preference to clear.
     /// </summary>
-    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetMeleeWeaponPreference))]
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetMeleeWeaponPreference), new Type[0])]
     public static class CompSidearmMemory_UnsetMeleeWeaponPreference_Patch
     {
         public static bool Prepare() => PlayerIntent.Require("UnsetMeleeWeaponPreference",
@@ -220,7 +242,8 @@ namespace CESidearmsSupply.Patches
         [HarmonyPostfix]
         public static void Postfix(CompSidearmMemory __instance, bool __state)
         {
-            if (!PlayerIntent.PlayerIsDriving || !__state)
+            if (!PlayerIntent.PlayerIsDriving || !__state
+                || !PlayerIntent.ManagedPawn(__instance?.Owner))
             {
                 return;
             }
@@ -233,7 +256,8 @@ namespace CESidearmsSupply.Patches
     }
 
     /// <summary>Setting a role by hand withdraws the veto on that category.</summary>
-    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetRangedWeaponTypeAsDefault))]
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetRangedWeaponTypeAsDefault),
+                  new[] { typeof(ThingDefStuffDefPair) })]
     public static class CompSidearmMemory_SetRangedWeaponTypeAsDefault_Patch
     {
         public static bool Prepare() => PlayerIntent.Require("SetRangedWeaponTypeAsDefault",
@@ -254,7 +278,8 @@ namespace CESidearmsSupply.Patches
         }
     }
 
-    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetMeleeWeaponTypeAsPreferred))]
+    [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.SetMeleeWeaponTypeAsPreferred),
+                  new[] { typeof(ThingDefStuffDefPair) })]
     public static class CompSidearmMemory_SetMeleeWeaponTypeAsPreferred_Patch
     {
         public static bool Prepare() => PlayerIntent.Require("SetMeleeWeaponTypeAsPreferred",
@@ -276,18 +301,19 @@ namespace CESidearmsSupply.Patches
     }
 
     /// <summary>
-    /// The machine-equip veto. A weapon the player took out of a pawn's sidearm rotation is
-    /// refused through the game's own per-pawn equip-refusal registry — the same hook
-    /// vanilla's biocode, bladelink and ideoligion role bans live in, and the one Combat
-    /// Extended consults at every site that arms a pawn autonomously: its loadout job's
-    /// candidate validator and all of SwitchToNextViableWeapon's picks. Refusing here removes
-    /// the weapon from those selections cleanly — CE takes its next candidate — instead of
-    /// cancelling a decided job from outside.
+    /// Blocks the game from arming a pawn with a weapon the player excluded — and nothing
+    /// else. CE asks EquipmentUtility.CanEquip two different questions: "may I draw this
+    /// from the pawn's inventory?" (its weapon-switch code, CompInventory) and "may I pick
+    /// this up off the map for a loadout row?" (its loadout job's search filter). The
+    /// exclusion is only an answer to the first, so this patch acts only on weapons already
+    /// in that pawn's inventory. Refusing map items was the original mistake: the gizmo's
+    /// removal gesture drops the weapon, and refusing the pickup left it on the ground with
+    /// its loadout row permanently unsatisfiable.
     ///
-    /// The veto stands down while the player's own Equip option is being built (see
-    /// PlayerChoosing), so the dropdown stays live: choosing it issues a playerForced job,
-    /// the equip goes through, and the withdrawal hook above clears the exclusion. One
-    /// gesture out, symmetric with the one gesture in.
+    /// While the player's own Equip menu entry is being built (PlayerChoosing — CE's
+    /// inventory tab, the one Equip surface that offers carried weapons), the patch does
+    /// nothing, so the option stays visible; choosing it clears the exclusion (see the
+    /// SyncedTrySwitchToWeapon patch below).
     /// </summary>
     [HarmonyPatch(typeof(EquipmentUtility), nameof(EquipmentUtility.CanEquip),
                   new[] { typeof(Thing), typeof(Pawn), typeof(string), typeof(bool) },
@@ -302,7 +328,7 @@ namespace CESidearmsSupply.Patches
                 return true;
             }
             Log.Error("[Sidearms&Supply] EquipmentUtility.CanEquip not found — excluded weapons "
-                      + "can be re-equipped by the game and will re-enter the sidearm rotation.");
+                      + "can be drawn by the game and will re-enter the sidearm rotation.");
             return false;
         }
 
@@ -313,8 +339,15 @@ namespace CESidearmsSupply.Patches
             {
                 return;
             }
+            // Only weapons the pawn is already carrying. A map item being evaluated here is
+            // CE deciding whether to HAUL it for a loadout row, and the exclusion must not
+            // stop the pawn carrying what their loadout declares.
+            if (pawn.inventory?.innerContainer == null || !pawn.inventory.innerContainer.Contains(thing))
+            {
+                return;
+            }
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
-            if (rec == null || rec.dontEquip.Count == 0)
+            if (rec == null || rec.dontEquip.Count == 0 || !PlayerIntent.ManagedPawn(pawn))
             {
                 return;
             }
@@ -326,20 +359,28 @@ namespace CESidearmsSupply.Patches
         }
     }
 
-    /// <summary>The stand-down scope: the player's Equip option is being built.</summary>
-    [HarmonyPatch(typeof(FloatMenuOptionProvider_Equip), "GetSingleOptionFor",
-                  new[] { typeof(Thing), typeof(FloatMenuContext) })]
-    public static class FloatMenuOptionProvider_Equip_GetSingleOptionFor_Patch
+    /// <summary>
+    /// While CE's inventory tab builds the menu for a carried item, the CanEquip patch
+    /// above does nothing — so the Equip entry for an excluded weapon stays clickable
+    /// instead of showing as dead. This is the only Equip surface that offers weapons the
+    /// pawn is carrying (the map right-click menus offer ground items, which the patch
+    /// never touches), so it is the only place the flag is still needed.
+    /// </summary>
+    [HarmonyPatch(typeof(ITab_Inventory), nameof(ITab_Inventory.DrawThingRowCE),
+                  new[] { typeof(float), typeof(float), typeof(Thing), typeof(bool) },
+                  new[] { ArgumentType.Ref, ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Normal })]
+    public static class ITab_Inventory_DrawThingRowCE_Patch
     {
         public static bool Prepare()
         {
-            if (AccessTools.Method(typeof(FloatMenuOptionProvider_Equip), "GetSingleOptionFor",
-                    new[] { typeof(Thing), typeof(FloatMenuContext) }) != null)
+            if (AccessTools.Method(typeof(ITab_Inventory), nameof(ITab_Inventory.DrawThingRowCE),
+                    new[] { typeof(float).MakeByRefType(), typeof(float), typeof(Thing), typeof(bool) }) != null)
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] FloatMenuOptionProvider_Equip.GetSingleOptionFor not found — "
-                      + "the Equip option will show excluded weapons as refused instead of offering them.");
+            Log.Error("[Sidearms&Supply] ITab_Inventory.DrawThingRowCE not found — the inventory "
+                      + "tab will show an excluded weapon's Equip entry as refused instead of "
+                      + "offering it. Combat Extended probably moved it.");
             return false;
         }
 
@@ -348,5 +389,47 @@ namespace CESidearmsSupply.Patches
 
         [HarmonyFinalizer]
         public static void Finalizer() => PlayerIntent.ExitChoice();
+    }
+
+    /// <summary>
+    /// Clicking that Equip entry clears the exclusion — the same meaning as choosing Equip
+    /// on the map menu. This path is a direct weapon switch, not an equip job, so Simple
+    /// Sidearms' own remember-on-equip hook never runs; calling InformOfAddedPrimary here
+    /// makes the end state identical to the job path: equipped, remembered, role set.
+    ///
+    /// Player-only by construction: SyncedTrySwitchToWeapon's single caller in all of CE is
+    /// this tab's menu entry. Machine switches call CompInventory.TrySwitchToWeapon
+    /// directly and never pass through it.
+    /// </summary>
+    [HarmonyPatch(typeof(ITab_Inventory), "SyncedTrySwitchToWeapon",
+                  new[] { typeof(CompInventory), typeof(ThingWithComps) })]
+    public static class ITab_Inventory_SyncedTrySwitchToWeapon_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(ITab_Inventory), "SyncedTrySwitchToWeapon",
+                    new[] { typeof(CompInventory), typeof(ThingWithComps) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] ITab_Inventory.SyncedTrySwitchToWeapon not found — "
+                      + "equipping an excluded weapon from the inventory tab will not clear "
+                      + "its exclusion. Combat Extended probably moved it.");
+            return false;
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(CompInventory compInventory, ThingWithComps eq)
+        {
+            if (eq?.def == null || !(compInventory?.parent is Pawn pawn))
+            {
+                return;
+            }
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            if (rec != null && rec.dontEquip.Remove(new ThingDefStuffDefPair(eq.def, eq.Stuff)))
+            {
+                CompSidearmMemory.GetMemoryCompForPawn(pawn)?.InformOfAddedPrimary(eq);
+            }
+        }
     }
 }

@@ -126,15 +126,39 @@ namespace CESidearmsSupply
             // dontEquip and the role vetoes are the player's, not this projection's, and the
             // button's own text promises not to touch what the loadout does not list. They
             // survive a release.
-            if (deferred == 0)
-            {
-                Settings.releasePending = false;
-                Settings.Write();
-            }
+            // The flag deliberately survives a successful sweep. It means "the feature is
+            // off with unfinished cleanup", and it stays set — releasing on every load, for
+            // every save — until the player turns the feature back on. Clearing it after the
+            // first save meant a second colony never got released at all.
             Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s)."
                              + (deferred > 0 ? $" {deferred} pawn(s) are away and will be released when they return." : ""),
                              MessageTypeDefOf.TaskCompletion, historical: false);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Runs the deferred release once per loaded game. It used to run from the reconcile's
+    /// Harmony prefix, which was wrong three ways: that hook can fire inside an open
+    /// gizmo-interaction scope (its forgets were then recorded as player exclusions), it
+    /// re-ran the release every pass while any colonist was unspawned (a caravan out meant
+    /// a notification chime forever), and the global flag was cleared after the first save
+    /// so a second colony was never cleaned.
+    /// </summary>
+    public class SupplySessionComponent : GameComponent
+    {
+        public SupplySessionComponent(Game game)
+        {
+        }
+
+        public override void FinalizeInit()
+        {
+            base.FinalizeInit();
+            if (SupplyMod.Settings != null && SupplyMod.Settings.releasePending
+                && !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+            {
+                SupplyMod.Release();
+            }
         }
     }
 

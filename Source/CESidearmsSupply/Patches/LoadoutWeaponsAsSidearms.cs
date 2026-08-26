@@ -27,6 +27,11 @@ namespace CESidearmsSupply.Patches
     /// Player intent outranks the loadout and is recorded where the player expresses it
     /// (see PlayerIntent), never deduced from a weapon having gone missing — Simple Sidearms
     /// drops memories on its own, most often when the pawn simply equips something else.
+    ///
+    /// Reconciled on CE's job-giver cadence rather than event-driven, deliberately: a missed
+    /// event is permanent, a missed pass lasts until the next one. Measured 2026-08-25
+    /// (test/run-supply-bench.sh): 18.4us per call at 0.79 calls per colonist per 1000
+    /// ticks — 0.0017% of a 60fps frame at 20 colonists.
     /// </summary>
     [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob")]
     public static class JobGiver_UpdateLoadout_TryGiveJob_Patch
@@ -52,12 +57,11 @@ namespace CESidearmsSupply.Patches
         {
             try
             {
-                // Before the setting check: this is the case where the player turned the
-                // feature OFF with no save loaded, so there was nothing to release then.
-                if (SupplyMod.Settings.releasePending)
-                {
-                    SupplyMod.Release();
-                }
+                // The deferred release used to run here and does not any more, deliberately:
+                // this hook can execute inside an open gizmo-interaction scope (a click that
+                // ends a job restarts the think tree synchronously), and a release running
+                // there had its own forgets recorded as player exclusions. It now runs from
+                // SupplySessionComponent.FinalizeInit, once per load.
                 if (!SupplyMod.Settings.loadoutWeaponsAsSidearms)
                 {
                     return;
@@ -127,8 +131,14 @@ namespace CESidearmsSupply.Patches
 
             HashSet<ThingDefStuffDefPair> target = Target(pawn, rec, declared);
 
+            // Kept BEFORE Apply reassigns rec.claimed: First() prefers the pair that backed
+            // the role on previous passes, and reading the freshly rebuilt list instead made
+            // that preference match anything and the deterministic fallback unreachable —
+            // the role could still flip with inventory order.
+            List<ThingDefStuffDefPair> previouslyClaimed = rec.claimed;
+
             Apply(memory, rec, target, forced, forcedDrafted);
-            AssertRoles(pawn, memory, rec, declared, target, forced);
+            AssertRoles(pawn, memory, rec, declared, target, forced, previouslyClaimed);
         }
 
         /// <summary>
@@ -240,7 +250,8 @@ namespace CESidearmsSupply.Patches
         /// </summary>
         private static void AssertRoles(Pawn pawn, CompSidearmMemory memory, CompLoadoutSidearms rec,
                                         List<ThingDef> declared, HashSet<ThingDefStuffDefPair> target,
-                                        ThingDefStuffDefPair? forced)
+                                        ThingDefStuffDefPair? forced,
+                                        List<ThingDefStuffDefPair> previouslyClaimed)
         {
             if (memory.ForcedUnarmed)
             {
@@ -254,7 +265,7 @@ namespace CESidearmsSupply.Patches
             if (!forcedRanged && !rec.rangedRoleVetoed
                 && !PlayersAndInHand(pawn, memory.DefaultRangedWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, rec, d => d.IsRangedWeapon);
+                ThingDefStuffDefPair? pick = First(declared, target, previouslyClaimed, d => d.IsRangedWeapon);
                 if (pick.HasValue && memory.DefaultRangedWeapon != pick)
                 {
                     memory.SetRangedWeaponTypeAsDefault(pick.Value);
@@ -267,7 +278,7 @@ namespace CESidearmsSupply.Patches
             }
             if (!PlayersAndInHand(pawn, memory.PreferredMeleeWeapon, declared))
             {
-                ThingDefStuffDefPair? pick = First(declared, target, rec, d => d.IsMeleeWeapon);
+                ThingDefStuffDefPair? pick = First(declared, target, previouslyClaimed, d => d.IsMeleeWeapon);
                 if (pick.HasValue && memory.PreferredMeleeWeapon != pick)
                 {
                     memory.SetMeleeWeaponTypeAsPreferred(pick.Value);
@@ -286,7 +297,7 @@ namespace CESidearmsSupply.Patches
         /// </summary>
         private static ThingDefStuffDefPair? First(List<ThingDef> declared,
                                                    HashSet<ThingDefStuffDefPair> target,
-                                                   CompLoadoutSidearms rec,
+                                                   List<ThingDefStuffDefPair> previouslyClaimed,
                                                    Func<ThingDef, bool> category)
         {
             foreach (ThingDef def in declared.Where(category))
@@ -296,7 +307,7 @@ namespace CESidearmsSupply.Patches
                 {
                     continue;
                 }
-                foreach (ThingDefStuffDefPair claimed in rec.claimed)
+                foreach (ThingDefStuffDefPair claimed in previouslyClaimed)
                 {
                     if (candidates.Contains(claimed))
                     {
