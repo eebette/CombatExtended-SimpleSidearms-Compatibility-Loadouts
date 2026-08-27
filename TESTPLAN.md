@@ -173,6 +173,11 @@ not a test.
 - The outfit-stand equip path is driven at the recorder's contract level (a
   playerForced UseOutfitStand job around a real AddEquipment), not through a real
   stand + driver; equipping an excluded weapon from an actual stand is a manual test — NOT YET RUN anywhere (the dev environment lacks the DLC, so the phase and the recorder clause both ship with zero executions).
+- Accepted edge (round-7 F4): a pawn who records an exclusion, dies, is purged from
+  CE's assignment dictionary by a save, whose loadout is then deleted and its id reused
+  by a new loadout, and who is then resurrected and assigned that new loadout, keeps the
+  dead loadout's exclusions (the RemoveLoadout sweep sees only living colonists). Five
+  rare events in strict order; escape is one gizmo click or any reassignment.
 - Drafted-side state is partially covered: the drafted gizmo's force branch has a phase
   (forcing an excluded weapon withdraws the exclusion); `ForcedWeaponWhileDrafted`
   surviving a release and the drafted reconcile-cadence gap still have none.

@@ -40,48 +40,6 @@ namespace CESidearmsSupply.Patches
     /// (test/run-supply-bench.sh): 18.4us per call at 0.79 calls per colonist per 1000
     /// ticks — 0.0017% of a 60fps frame at 20 colonists.
     /// </summary>
-    /// <summary>
-    /// CE reuses loadout ids (GetUniqueLoadoutID is max-plus-one over SURVIVORS), and
-    /// loadout surgery happens paused — no recorder or enforcement read interposes
-    /// between deleting a loadout and assigning a recreated one that inherits the dead
-    /// id, so the read-side SyncAssignment compare would see equal ids and keep the dead
-    /// loadout's rules. Deletion itself is therefore observed: affected records sync at
-    /// the moment CE moves their pawns to the default loadout.
-    /// </summary>
-    [HarmonyPatch(typeof(LoadoutManager), nameof(LoadoutManager.RemoveLoadout), new[] { typeof(Loadout) })]
-    public static class LoadoutManager_RemoveLoadout_Patch
-    {
-        public static bool Prepare()
-        {
-            if (AccessTools.Method(typeof(LoadoutManager), nameof(LoadoutManager.RemoveLoadout),
-                                   new[] { typeof(Loadout) }) != null)
-            {
-                return true;
-            }
-            Log.Error("[Sidearms&Supply] LoadoutManager.RemoveLoadout not found — deleting a "
-                      + "loadout can leave its exclusions governing a recreated one. "
-                      + "Combat Extended probably moved it.");
-            return false;
-        }
-
-        [HarmonyPostfix]
-        public static void Postfix(Loadout loadout)
-        {
-            if (loadout == null || Current.Game == null)
-            {
-                return;
-            }
-            foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive_Colonists)
-            {
-                CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
-                if (rec != null && rec.lastLoadoutId == loadout.UniqueID)
-                {
-                    rec.SyncAssignment(pawn);
-                }
-            }
-        }
-    }
-
     [HarmonyPatch(typeof(JobGiver_UpdateLoadout), "TryGiveJob", new[] { typeof(Pawn) })]
     public static class JobGiver_UpdateLoadout_TryGiveJob_Patch
     {
@@ -499,5 +457,47 @@ namespace CESidearmsSupply.Patches
                    && !declared.Contains(role.Value.thing) && pawn.hasWeaponType(role.Value);
         }
 
+    }
+
+    /// <summary>
+    /// CE reuses loadout ids (GetUniqueLoadoutID is max-plus-one over SURVIVORS), and
+    /// loadout surgery happens paused — no recorder or enforcement read interposes
+    /// between deleting a loadout and assigning a recreated one that inherits the dead
+    /// id, so the read-side SyncAssignment compare would see equal ids and keep the dead
+    /// loadout's rules. Deletion itself is therefore observed: affected records sync at
+    /// the moment CE moves their pawns to the default loadout.
+    /// </summary>
+    [HarmonyPatch(typeof(LoadoutManager), nameof(LoadoutManager.RemoveLoadout), new[] { typeof(Loadout) })]
+    public static class LoadoutManager_RemoveLoadout_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(LoadoutManager), nameof(LoadoutManager.RemoveLoadout),
+                                   new[] { typeof(Loadout) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] LoadoutManager.RemoveLoadout not found — deleting a "
+                      + "loadout can leave its exclusions governing a recreated one. "
+                      + "Combat Extended probably moved it.");
+            return false;
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(Loadout loadout)
+        {
+            if (loadout == null || Current.Game == null)
+            {
+                return;
+            }
+            foreach (Pawn pawn in PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive_Colonists)
+            {
+                CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+                if (rec != null && rec.lastLoadoutId == loadout.UniqueID)
+                {
+                    rec.SyncAssignment(pawn);
+                }
+            }
+        }
     }
 }

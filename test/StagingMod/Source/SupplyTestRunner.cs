@@ -114,9 +114,10 @@ namespace CESupplyTestStaging
             // it fires on a save this module has never touched.
             "had a null weapon memory, removing",
             "had a missing def or malformed data, removing",
-            // The harness's own informational lines — NOT a blanket prefix: the
-            // runner's "threw:" error reports must stay visible to this gate, or a dead
-            // poll/mutate is excused by the very instrument meant to catch it.
+            // The harness's own lines — NOT a blanket prefix. The runner's "threw:"
+            // reports fail their own phase directly at the catch sites (phase.failed),
+            // so listing them here loses nothing; it only stops the report bleeding into
+            // the NEXT phase's diagnostic scan, which double-failed one throw.
             "[SupplyTest] Phase ",
             "[SupplyTest] poll for ",
             "[SupplyTest] Mutation for phase ",
@@ -2724,10 +2725,11 @@ namespace CESupplyTestStaging
             // Round-5 High: the SS-funnel ban had a CurJob.playerForced exemption — and
             // vanilla stamps that flag on EVERY right-click order, attacks included, while
             // no player equip gesture ever reaches the funnel at all. So the ban switched
-            // itself off during player-directed combat. Paired fix: the exclusion is now
-            // registered at SELECTION (canUseSidearmInstance, where SS registers
-            // bladelink), so the pickers skip the excluded weapon and the runner-up wins
-            // instead of the refusal falling through to melee/unarmed.
+            // itself off during player-directed combat. Paired fix (round-6 shape): the
+            // exclusion is registered at the picker INPUTS — the SelectionFilter bracket
+            // plus the GetCarriedWeapons filter — so the pickers skip the excluded weapon
+            // and the runner-up wins instead of the refusal falling through to
+            // melee/unarmed.
             phases.Add(new Phase
             {
                 label = "an-ordered-job-does-not-unpocket-an-excluded-weapon",
@@ -2738,7 +2740,7 @@ namespace CESupplyTestStaging
                     // compat patch's ammo-aware re-run (P03) and scored by CE's DPS table
                     // — three phase designs in a row lost to that machinery. The melee
                     // picker is upstream-pure: no ammo, no sibling patches, same
-                    // canUseSidearmInstance gate under test.
+                    // SelectionFilter bracket under test.
                     Baseline(dockie, loadout, gladius, D("MeleeWeapon_Knife"));
                     // SELF-CALIBRATING: ask the picker for its favourite and exclude
                     // exactly that — whichever blade the scorer prefers is the only one

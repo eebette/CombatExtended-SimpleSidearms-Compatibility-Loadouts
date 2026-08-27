@@ -559,7 +559,7 @@ namespace CESidearmsSupply.Patches
     /// pairs — the sibling compat patch's own proven seam (its P03 hides ammo-dry guns
     /// exactly this way). The pickers pick the runner-up; the gizmo never sees anything
     /// unusual (an excluded weapon renders as a normal unmemorised entry, clicks and
-    /// all); the funnel prefix below stays as the backstop; and none of it sits behind
+    /// all); the funnel prefix above stays as the backstop; and none of it sits behind
     /// SS's AllowBlockedWeaponUse gate.
     /// </summary>
     public static class SelectionFilter
