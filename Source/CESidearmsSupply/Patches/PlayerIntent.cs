@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using CombatExtended;
@@ -90,7 +91,13 @@ namespace CESidearmsSupply.Patches
         internal static CompLoadoutSidearms RecordFor(CompSidearmMemory memory)
         {
             Pawn pawn = memory?.Owner;
-            return pawn != null && pawn.IsColonist ? CompLoadoutSidearms.For(pawn) : null;
+            CompLoadoutSidearms rec = pawn != null && pawn.IsColonist ? CompLoadoutSidearms.For(pawn) : null;
+            // Every recorder and withdrawal acts on the CURRENT assignment's record:
+            // stale rules from a previous assignment are cleared before anything reads
+            // or writes, so a gesture made right after reassigning a loadout is recorded
+            // under the new assignment instead of being destroyed by the pending clear.
+            rec?.SyncAssignment(pawn);
+            return rec;
         }
 
         /// <summary>
@@ -363,6 +370,7 @@ namespace CESidearmsSupply.Patches
                 return;
             }
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            rec?.SyncAssignment(pawn);
             if (rec == null || rec.dontEquip.Count == 0 || !PlayerIntent.ManagedPawn(pawn))
             {
                 return;
@@ -488,6 +496,7 @@ namespace CESidearmsSupply.Patches
                 return true;
             }
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            rec?.SyncAssignment(pawn);
             if (rec == null || rec.dontEquip.Count == 0)
             {
                 return true;
@@ -540,59 +549,175 @@ namespace CESidearmsSupply.Patches
     }
 
     /// <summary>
-    /// The exclusion, registered where Simple Sidearms registers its own bans: at
-    /// SELECTION. SS honours bladelink/biocode inside canUseSidearmInstance, which every
-    /// picker filters through — so a ban living only at the equip step let the pickers
-    /// NOMINATE the excluded weapon, and the late refusal made SS's ranged branch fall
-    /// through to melee/unarmed instead of trying the runner-up gun, and made the warmup
-    /// swap report a swap that never happened. Registered here, every picker skips the
-    /// weapon up front and the runner-up wins; SS's own equip-time re-check
-    /// (WeaponAssingment.equipSpecificWeapon) then enforces it a second time for free,
-    /// and the gizmo renders the weapon with SS's own blocked cross and this reason.
-    ///
-    /// Two gates keep the player's surfaces open: PlayerIsDriving (gizmo clicks — the
-    /// blocked cross does not disable the click region, and the interaction runs inside
-    /// the scope where this stands down), and Spawned (the map float menu's "equip as
-    /// sidearm" option is built from a SPAWNED map item outside any scope; carried
-    /// weapons are unspawned, so every carried-side surface is covered and the map undo
-    /// gesture is not).
+    /// The exclusion, registered at the picker INPUTS. It briefly lived inside
+    /// StatCalculator.canUseSidearmInstance — SS's shared usability predicate — which
+    /// gave the gizmo's blocked cross for free, and with it SS's UI contract that a
+    /// crossed icon is permanently uninteractable: the draw returns before registering
+    /// any click region, so the undo gestures died. A retractable state must not ride a
+    /// UI built for unretractable ones (review ruling, round 6). Instead, while one of
+    /// SS's three pickers is asking, the carried-weapon list simply omits excluded
+    /// pairs — the sibling compat patch's own proven seam (its P03 hides ammo-dry guns
+    /// exactly this way). The pickers pick the runner-up; the gizmo never sees anything
+    /// unusual (an excluded weapon renders as a normal unmemorised entry, clicks and
+    /// all); the funnel prefix below stays as the backstop; and none of it sits behind
+    /// SS's AllowBlockedWeaponUse gate.
     /// </summary>
-    [HarmonyPatch(typeof(StatCalculator), nameof(StatCalculator.canUseSidearmInstance),
-                  new[] { typeof(ThingWithComps), typeof(Pawn), typeof(string) },
-                  new[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Out })]
-    public static class StatCalculator_canUseSidearmInstance_Patch
+    public static class SelectionFilter
+    {
+        [ThreadStatic] private static Pawn hidingExcludedFor;
+
+        /// <summary>Re-entrancy-safe: the sibling's P03 re-runs a picker inside its own
+        /// postfix, so only the outermost bracket owns the flag.</summary>
+        internal static bool Begin(Pawn pawn)
+        {
+            if (hidingExcludedFor != null || pawn == null)
+            {
+                return false;
+            }
+            hidingExcludedFor = pawn;
+            return true;
+        }
+
+        internal static void End(bool ours)
+        {
+            if (ours)
+            {
+                hidingExcludedFor = null;
+            }
+        }
+
+        internal static void Filter(Pawn pawn, List<ThingWithComps> list)
+        {
+            if (list == null || pawn == null || hidingExcludedFor != pawn
+                || PlayerIntent.PlayerIsDriving || !PlayerIntent.ManagedPawn(pawn))
+            {
+                return;
+            }
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            if (rec == null)
+            {
+                return;
+            }
+            rec.SyncAssignment(pawn);
+            if (rec.dontEquip.Count == 0)
+            {
+                return;
+            }
+            CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
+            list.RemoveAll(w =>
+            {
+                if (w?.def == null)
+                {
+                    return false;
+                }
+                ThingDefStuffDefPair pair = w.toThingDefStuffDefPair();
+                if (!rec.dontEquip.Contains(pair))
+                {
+                    return false;
+                }
+                // A force outranks the exclusion, matching the funnel and the reconcile.
+                return memory == null
+                       || (memory.ForcedWeapon != pair && memory.ForcedWeaponWhileDrafted != pair);
+            });
+        }
+    }
+
+    [HarmonyPatch(typeof(GettersFilters), nameof(GettersFilters.findBestRangedWeapon),
+                  new[] { typeof(Pawn), typeof(LocalTargetInfo?), typeof(bool), typeof(bool), typeof(bool), typeof(bool) })]
+    public static class GettersFilters_findBestRangedWeapon_Patch
     {
         public static bool Prepare()
         {
-            if (AccessTools.Method(typeof(StatCalculator), nameof(StatCalculator.canUseSidearmInstance),
-                    new[] { typeof(ThingWithComps), typeof(Pawn), typeof(string).MakeByRefType() }) != null)
+            if (AccessTools.Method(typeof(GettersFilters), nameof(GettersFilters.findBestRangedWeapon),
+                    new[] { typeof(Pawn), typeof(LocalTargetInfo?), typeof(bool), typeof(bool), typeof(bool), typeof(bool) }) != null)
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] StatCalculator.canUseSidearmInstance not found — Simple "
-                      + "Sidearms' pickers can still nominate an excluded weapon. "
+            Log.Error("[Sidearms&Supply] GettersFilters.findBestRangedWeapon not found — Simple "
+                      + "Sidearms' ranged picker can nominate an excluded weapon. "
+                      + "Simple Sidearms probably moved it.");
+            return false;
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(Pawn pawn, out bool __state) => __state = SelectionFilter.Begin(pawn);
+
+        [HarmonyFinalizer]
+        public static void Finalizer(bool __state) => SelectionFilter.End(__state);
+    }
+
+    [HarmonyPatch(typeof(GettersFilters), nameof(GettersFilters.findBestMeleeWeapon),
+                  new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool), typeof(Pawn) },
+                  new[] { ArgumentType.Normal, ArgumentType.Out, ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Normal })]
+    public static class GettersFilters_findBestMeleeWeapon_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(GettersFilters), nameof(GettersFilters.findBestMeleeWeapon),
+                    new[] { typeof(Pawn), typeof(ThingWithComps).MakeByRefType(), typeof(bool), typeof(bool), typeof(Pawn) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] GettersFilters.findBestMeleeWeapon not found — Simple "
+                      + "Sidearms' melee picker can nominate an excluded weapon. "
+                      + "Simple Sidearms probably moved it.");
+            return false;
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(Pawn pawn, out bool __state) => __state = SelectionFilter.Begin(pawn);
+
+        [HarmonyFinalizer]
+        public static void Finalizer(bool __state) => SelectionFilter.End(__state);
+    }
+
+    /// <summary>The autotool picker enumerates carried tools directly and tries no
+    /// runner-up on a refusal — unbracketed, excluding the best tool silently disabled
+    /// tool-switching for its stat class outright.</summary>
+    [HarmonyPatch(typeof(WeaponAssingment), nameof(WeaponAssingment.equipBestWeaponFromInventoryByStatModifiers),
+                  new[] { typeof(Pawn), typeof(List<StatDef>) })]
+    public static class WeaponAssingment_equipBestByStatModifiers_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(WeaponAssingment), nameof(WeaponAssingment.equipBestWeaponFromInventoryByStatModifiers),
+                    new[] { typeof(Pawn), typeof(List<StatDef>) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] WeaponAssingment.equipBestWeaponFromInventoryByStatModifiers "
+                      + "not found — excluding a tool can suspend tool auto-switching. "
+                      + "Simple Sidearms probably moved it.");
+            return false;
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(Pawn pawn, out bool __state) => __state = SelectionFilter.Begin(pawn);
+
+        [HarmonyFinalizer]
+        public static void Finalizer(bool __state) => SelectionFilter.End(__state);
+    }
+
+    [HarmonyPatch(typeof(PeteTimesSix.SimpleSidearms.Extensions), nameof(PeteTimesSix.SimpleSidearms.Extensions.GetCarriedWeapons),
+                  new[] { typeof(Pawn), typeof(bool), typeof(bool) })]
+    public static class Extensions_GetCarriedWeapons_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(PeteTimesSix.SimpleSidearms.Extensions), nameof(PeteTimesSix.SimpleSidearms.Extensions.GetCarriedWeapons),
+                    new[] { typeof(Pawn), typeof(bool), typeof(bool) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] Extensions.GetCarriedWeapons not found — the exclusion "
+                      + "cannot be hidden from Simple Sidearms' pickers. "
                       + "Simple Sidearms probably moved it.");
             return false;
         }
 
         [HarmonyPostfix]
-        public static void Postfix(ThingWithComps sidearmThing, Pawn pawn,
-                                   ref string errString, ref bool __result)
-        {
-            if (!__result || PlayerIntent.PlayerIsDriving || sidearmThing?.def == null
-                || sidearmThing.Spawned || pawn == null || !PlayerIntent.ManagedPawn(pawn))
-            {
-                return;
-            }
-            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
-            if (rec == null || rec.dontEquip.Count == 0
-                || !rec.dontEquip.Contains(sidearmThing.toThingDefStuffDefPair()))
-            {
-                return;
-            }
-            __result = false;
-            errString = "excluded from " + pawn.LabelShort + "'s sidearm rotation";
-        }
+        public static void Postfix(Pawn pawn, List<ThingWithComps> __result)
+            => SelectionFilter.Filter(pawn, __result);
     }
 
     /// <summary>
@@ -707,6 +832,7 @@ namespace CESidearmsSupply.Patches
                 return;
             }
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            rec?.SyncAssignment(pawn);
             if (rec == null || !rec.dontEquip.Remove(new ThingDefStuffDefPair(newEq.def, newEq.Stuff)))
             {
                 return;

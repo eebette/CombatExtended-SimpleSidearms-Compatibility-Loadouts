@@ -1,3 +1,4 @@
+using CombatExtended;
 using System.Collections.Generic;
 using System.Linq;
 using SimpleSidearms.rimworld;
@@ -56,6 +57,34 @@ namespace CESidearmsSupply
         /// a rule recorded under one loadout has no defined meaning under another.
         /// </summary>
         public int lastLoadoutId = -1;
+
+        /// <summary>
+        /// Enforce the per-assignment rule at the moment the record is touched, not just
+        /// on the reconcile's cadence. The reconcile-only compare left two holes: a
+        /// gesture recorded between an assignment change and the first pass was destroyed
+        /// by the pending clear (the record still carried the OLD id, so the player's
+        /// brand-new exclusion read as stale), and enforcement kept honouring stale rules
+        /// on pawns that get no passes (drafted, caravan). Called at the top of every
+        /// recorder and enforcement read; a dictionary lookup and an int compare.
+        /// (Loadout DELETION is the one writer this cannot see in time — CE reuses ids —
+        /// and is handled by the RemoveLoadout postfix instead.)
+        /// </summary>
+        public void SyncAssignment(Pawn pawn)
+        {
+            int id = -1;
+            if (LoadoutManager.AssignedLoadouts.TryGetValue(pawn, out Loadout assigned)
+                && assigned != null && !assigned.defaultLoadout)
+            {
+                id = assigned.UniqueID;
+            }
+            if (lastLoadoutId != id)
+            {
+                dontEquip.Clear();
+                rangedRoleVetoed = false;
+                meleeRoleVetoed = false;
+                lastLoadoutId = id;
+            }
+        }
         public bool meleeRoleVetoed;
 
         public Pawn Pawn => parent as Pawn;
@@ -110,6 +139,14 @@ namespace CESidearmsSupply
         public int Release(CompSidearmMemory memory, ThingDefStuffDefPair? forced,
                            ThingDefStuffDefPair? forcedDrafted)
         {
+            // Empty claims are a non-event regardless of whether the memory comp is
+            // resolvable — counting an away pawn with nothing claimed as "deferred" made
+            // every save with a caravan toast "Released 0 ... 1 pawn(s) are away" on
+            // every load while the flag was armed.
+            if (claimed.Count == 0)
+            {
+                return 0;
+            }
             if (memory?.RememberedWeapons == null)
             {
                 return -1;

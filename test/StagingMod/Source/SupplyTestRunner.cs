@@ -118,6 +118,9 @@ namespace CESupplyTestStaging
             // runner's "threw:" error reports must stay visible to this gate, or a dead
             // poll/mutate is excused by the very instrument meant to catch it.
             "[SupplyTest] Phase ",
+            "[SupplyTest] poll for ",
+            "[SupplyTest] Mutation for phase ",
+            "[SupplyTest] Setup for phase ",
             "[SupplyTest] Isolated run",
             "[SupplyTest] Results written",
             "[SupplyTest] Scenario complete",
@@ -858,6 +861,8 @@ namespace CESupplyTestStaging
             bool standEquipWithdrew = false;
             bool forcedPairSurvivedRelease = false;
             bool releaseTookTheRest = false;
+            bool gestureAfterAssignSurvived = false;
+            bool reusedIdKeptRules = true;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -998,6 +1003,7 @@ namespace CESupplyTestStaging
                 // its first pass, so C + minTicks would sample once and idle; only a negative
                 // re-evaluates every poll for the whole window.
                 minTicks = 600,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1044,6 +1050,7 @@ namespace CESupplyTestStaging
                 label = "manual-memory-protected",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1257,6 +1264,7 @@ namespace CESupplyTestStaging
                 label = "gizmo-forget-of-declared-weapon-sticks",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () => PlayerForgets(dockie, pistol),
                 checks =
@@ -1416,6 +1424,7 @@ namespace CESupplyTestStaging
                 label = "forced-weapon-survives-its-row-leaving-the-loadout",
                 deadlineTicks = 6000,
                 minTicks = 300,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1459,6 +1468,7 @@ namespace CESupplyTestStaging
                 label = "declared-but-uncarried-weapon-is-not-remembered-with-a-guessed-stuff",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1492,6 +1502,7 @@ namespace CESupplyTestStaging
                 label = "a-hand-cleared-ranged-role-is-not-restored",
                 deadlineTicks = 6000,
                 minTicks = 600,
+                poll = () => ForceReconcile(dockie),
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -2212,6 +2223,12 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
+                    P("the-tab-wrapper-still-resolves", () =>
+                    {
+                        bool ok = AccessTools.Method(typeof(CombatExtended.ITab_Inventory),
+                            "SyncedTrySwitchToWeapon") != null;
+                        return (ok, $"resolves={ok}");
+                    }),
                     P("pistol-starts-excluded-and-carried", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
@@ -2547,7 +2564,9 @@ namespace CESupplyTestStaging
                         // feature booted off, phase 0 burned its whole deadline fetching
                         // nothing, and the A/B legs judged a broken world.
                         settings.loadoutWeaponsAsSidearms = true;
-                        settings.releasePending = wasPending;
+                        // The staged default, NOT wasPending: a poisoned boot value would
+                        // self-perpetuate through the restore.
+                        settings.releasePending = false;
                         settings.Write();
                     }
                     ForceReconcile(dockie);
@@ -2657,55 +2676,47 @@ namespace CESupplyTestStaging
                 {
                     C("all-patch-targets-carry-our-owner", () =>
                     {
-                        var targets = new (string name, System.Reflection.MethodBase m)[]
-                        {
-                            ("Gizmo_SidearmsList.handleInteraction", AccessTools.Method(typeof(Gizmo_SidearmsList), "handleInteraction",
-                                new[] { typeof(Gizmo_SidearmsList.SidearmsListInteraction), typeof(UnityEngine.Event) })),
-                            ("CompSidearmMemory.ForgetSidearmMemory", AccessTools.Method(typeof(CompSidearmMemory), "ForgetSidearmMemory",
-                                new[] { typeof(ThingDefStuffDefPair) })),
-                            ("CompSidearmMemory.InformOfAddedSidearm", AccessTools.Method(typeof(CompSidearmMemory), "InformOfAddedSidearm",
-                                new[] { typeof(Thing) })),
-                            ("CompSidearmMemory.UnsetRangedWeaponDefault", AccessTools.Method(typeof(CompSidearmMemory), "UnsetRangedWeaponDefault", Type.EmptyTypes)),
-                            ("CompSidearmMemory.UnsetMeleeWeaponPreference", AccessTools.Method(typeof(CompSidearmMemory), "UnsetMeleeWeaponPreference", Type.EmptyTypes)),
-                            ("CompSidearmMemory.SetRangedWeaponTypeAsDefault", AccessTools.Method(typeof(CompSidearmMemory), "SetRangedWeaponTypeAsDefault",
-                                new[] { typeof(ThingDefStuffDefPair) })),
-                            ("CompSidearmMemory.SetMeleeWeaponTypeAsPreferred", AccessTools.Method(typeof(CompSidearmMemory), "SetMeleeWeaponTypeAsPreferred",
-                                new[] { typeof(ThingDefStuffDefPair) })),
-                            ("CompSidearmMemory.SetWeaponAsForced", AccessTools.Method(typeof(CompSidearmMemory), "SetWeaponAsForced",
-                                new[] { typeof(ThingDefStuffDefPair), typeof(bool) })),
-                            ("EquipmentUtility.CanEquip", AccessTools.Method(typeof(RimWorld.EquipmentUtility), "CanEquip",
-                                new[] { typeof(Thing), typeof(Pawn), typeof(string).MakeByRefType(), typeof(bool) })),
-                            ("WeaponAssingment.equipSpecificWeapon", AccessTools.Method(typeof(WeaponAssingment), "equipSpecificWeapon",
-                                new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) })),
-                            ("WITab_Caravan_Gear.TryEquipDraggedItem", AccessTools.Method(typeof(RimWorld.Planet.WITab_Caravan_Gear), "TryEquipDraggedItem",
-                                new[] { typeof(Pawn) })),
-                            ("ITab_Inventory.DrawThingRowCE", AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "DrawThingRowCE",
-                                new[] { typeof(float).MakeByRefType(), typeof(float), typeof(Thing), typeof(bool) })),
-                            ("ITab_Inventory.SyncedTrySwitchToWeapon", AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "SyncedTrySwitchToWeapon",
-                                new[] { typeof(CombatExtended.CompInventory), typeof(ThingWithComps) })),
-                            ("Pawn_EquipmentTracker.AddEquipment", AccessTools.Method(typeof(Pawn_EquipmentTracker), "AddEquipment",
-                                new[] { typeof(ThingWithComps) })),
-                            ("JobGiver_UpdateLoadout.TryGiveJob", AccessTools.Method(typeof(CombatExtended.JobGiver_UpdateLoadout), "TryGiveJob",
-                                new[] { typeof(Pawn) })),
-                        };
+                        // Derived from the assembly's own [HarmonyPatch] classes — a
+                        // hardcoded list lagged the 16th patch within one round of being
+                        // written, exactly as predicted when it was reviewed.
                         var missing = new List<string>();
-                        foreach (var (name, m) in targets)
+                        int total = 0;
+                        foreach (Type t in typeof(CESidearmsSupply.SupplyMod).Assembly.GetTypes())
                         {
-                            if (m == null)
+                            var attrs = t.GetCustomAttributes(typeof(HarmonyPatch), inherit: true);
+                            if (attrs.Length == 0)
                             {
-                                missing.Add(name + " (method not found)");
                                 continue;
                             }
-                            var info = Harmony.GetPatchInfo(m);
-                            bool ours = info != null && info.Owners.Contains("eebette.CESidearmsSupply");
-                            if (!ours)
+                            var info = HarmonyMethod.Merge(attrs.Cast<HarmonyPatch>()
+                                .Select(a => a.info).ToList());
+                            if (info.declaringType == null || info.methodName == null)
                             {
-                                missing.Add(name);
+                                continue;
+                            }
+                            total++;
+                            System.Reflection.MethodBase m = null;
+                            try
+                            {
+                                m = AccessTools.Method(info.declaringType, info.methodName,
+                                                       info.argumentTypes);
+                            }
+                            catch { }
+                            if (m == null)
+                            {
+                                missing.Add(t.Name + " (target unresolved)");
+                                continue;
+                            }
+                            var patches = Harmony.GetPatchInfo(m);
+                            if (patches == null || !patches.Owners.Contains("eebette.CESidearmsSupply"))
+                            {
+                                missing.Add(t.Name);
                             }
                         }
-                        return (missing.Count == 0, missing.Count == 0
-                                ? $"all {targets.Length} targets patched"
-                                : "UNPATCHED: " + string.Join(", ", missing));
+                        return (missing.Count == 0 && total >= 16,
+                                missing.Count == 0
+                                    ? $"all {total} declared targets patched"
+                                    : "UNPATCHED: " + string.Join(", ", missing));
                     }),
                 }
             });
@@ -2751,6 +2762,19 @@ namespace CESupplyTestStaging
                     Verse.AI.Job order = JobMaker.MakeJob(JobDefOf.Goto, dest);
                     dockie.jobs.TryTakeOrderedJob(order);
                     orderedSwapJobWasForced = dockie.CurJob?.playerForced ?? false;
+                    // Empty the hands first: SS can arm the runner-up in the arrange→mutate
+                    // gap, and a swap to a blade ALREADY held legitimately does not move
+                    // (SS early-returns on Primary == pick) — the movement requirement
+                    // then false-reds the fixed tree. From empty hands, fixed = the
+                    // runner-up is equipped (movement), broken = nothing is (the funnel
+                    // refused the nominated favourite and the tree fell through).
+                    ThingWithComps held = dockie.equipment?.Primary;
+                    if (held != null)
+                    {
+                        dockie.equipment.TryTransferEquipmentToContainer(held, dockie.inventory.innerContainer);
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    ThingDef primaryBefore = dockie.equipment?.Primary?.def;
                     // SS's re-arm entry point, driven in melee mode: with the old
                     // playerForced exemption this equipped the excluded blade; with
                     // selection-level registration the other blade wins.
@@ -2762,8 +2786,11 @@ namespace CESupplyTestStaging
                     orderedSwapPickerSaw = sawNow?.def?.defName ?? "null";
                     ThingDef primaryNow = dockie.equipment?.Primary?.def;
                     orderedSwapSkippedExcluded = primaryNow != orderedSwapFavourite;
+                    // The runner-up must be the SWAP's doing: without the pre-act sample,
+                    // an already-wielded runner-up satisfied this with the selection
+                    // patch deleted (the funnel blocked the nomination and nothing moved).
                     orderedSwapPickedRunnerUp = primaryNow != null && primaryNow.IsMeleeWeapon
-                        && primaryNow != orderedSwapFavourite;
+                        && primaryNow != orderedSwapFavourite && primaryNow != primaryBefore;
                 },
                 checks =
                 {
@@ -2786,10 +2813,15 @@ namespace CESupplyTestStaging
                     {
                         return (orderedSwapSkippedExcluded, $"skipped={orderedSwapSkippedExcluded}");
                     }),
-                    C("the-runner-up-gun-won", () =>
+                    C("the-picker-no-longer-sees-the-favourite", () =>
                     {
-                        // The refusal must not fall through to melee/unarmed — the second
-                        // best RANGED weapon takes the slot.
+                        bool skipped = orderedSwapPickerSaw != (orderedSwapFavourite?.defName ?? "?");
+                        return (skipped, $"picker-saw={orderedSwapPickerSaw}");
+                    }),
+                    C("the-runner-up-blade-won", () =>
+                    {
+                        // The refusal must not fall through to unarmed — the second-best
+                        // BLADE takes the slot, and the swap itself must have moved it.
                         return (orderedSwapPickedRunnerUp,
                                 $"runner-up equipped={orderedSwapPickedRunnerUp} "
                                 + $"picker-saw={orderedSwapPickerSaw} "
@@ -2913,6 +2945,11 @@ namespace CESupplyTestStaging
                 },
                 checks =
                 {
+                    P("the-curjob-field-still-resolves", () =>
+                    {
+                        bool ok = AccessTools.Field(typeof(Verse.AI.Pawn_JobTracker), "curJob") != null;
+                        return (ok, $"resolves={ok}");
+                    }),
                     P("pistol-starts-excluded", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
@@ -2958,6 +2995,7 @@ namespace CESupplyTestStaging
                             mem.ForcedWeapon?.thing == shotgun
                             && mem.RememberedWeapons.Any(pr => pr.thing == shotgun);
                         releaseTookTheRest = rec != null
+                            && rec.claimed.Any(pr => pr.thing == shotgun)
                             && rec.claimed.All(pr => pr.thing == shotgun)
                             && !mem.RememberedWeapons.Any(pr => pr.thing == sniper);
                     }
@@ -2983,6 +3021,158 @@ namespace CESupplyTestStaging
                     C("everything-unforced-was-released", () =>
                     {
                         return (releaseTookTheRest, $"rest released={releaseTookTheRest}");
+                    }),
+                }
+            });
+
+            // Round-6 P2: a gesture made right after reassigning a loadout must be
+            // recorded under the NEW assignment, not destroyed by the pending
+            // per-assignment clear ~20 seconds later. The recorders sync the assignment
+            // stamp before writing.
+            phases.Add(new Phase
+            {
+                label = "a-gesture-right-after-a-reassignment-survives",
+                deadlineTicks = 6000,
+                minTicks = 600,
+                poll = () => ForceReconcile(dockie),
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
+                {
+                    var fresh = new Loadout("supply-test-fresh");
+                    LoadoutManager.AddLoadout(fresh);
+                    try
+                    {
+                        foreach (ThingDef d in new[] { sniper, shotgun, pistol, gladius })
+                        {
+                            fresh.AddSlot(new LoadoutSlot(d, 1));
+                        }
+                        // Assign, then IMMEDIATELY gesture — no reconcile in between: the
+                        // record still carries the old assignment's stamp when the forget
+                        // hook runs, which is exactly the destroyed-gesture window.
+                        dockie.SetLoadout(fresh);
+                        PlayerForgets(dockie, pistol);
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        gestureAfterAssignSurvived = rec != null
+                            && rec.dontEquip.Any(pr => pr.thing == pistol);
+                    }
+                    finally
+                    {
+                        dockie.SetLoadout(loadout);
+                        LoadoutManager.RemoveLoadout(fresh);
+                        ForceReconcile(dockie);
+                    }
+                },
+                checks =
+                {
+                    C("the-gesture-was-recorded-under-the-new-assignment", () =>
+                    {
+                        return (gestureAfterAssignSurvived, $"survived={gestureAfterAssignSurvived}");
+                    }),
+                }
+            });
+
+            // Round-6 P3: CE reuses loadout ids (max-plus-one over survivors) and loadout
+            // surgery happens paused, so deleting a loadout and recreating one that
+            // inherits the dead id must not resurrect the dead loadout's rules. The
+            // deletion itself is observed (RemoveLoadout postfix).
+            phases.Add(new Phase
+            {
+                label = "a-recreated-loadout-does-not-inherit-a-dead-ones-exclusions",
+                deadlineTicks = 6000,
+                arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
+                mutate = () =>
+                {
+                    var doomed = new Loadout("supply-test-doomed");
+                    LoadoutManager.AddLoadout(doomed);
+                    Loadout reborn = null;
+                    try
+                    {
+                        foreach (ThingDef d in new[] { sniper, pistol })
+                        {
+                            doomed.AddSlot(new LoadoutSlot(d, 1));
+                        }
+                        dockie.SetLoadout(doomed);
+                        // Stamp the doomed assignment BEFORE recording the gesture — the
+                        // A leg otherwise loses the exclusion to the destroyed-gesture bug
+                        // (a different finding) before the id-reuse scenario even starts.
+                        ForceReconcile(dockie);
+                        PlayerForgets(dockie, pistol);
+                        int deadId = doomed.UniqueID;
+                        // The paused-surgery window: delete, recreate, reassign, with NO
+                        // reconcile anywhere in between.
+                        LoadoutManager.RemoveLoadout(doomed);
+                        reborn = new Loadout("supply-test-reborn");
+                        LoadoutManager.AddLoadout(reborn);
+                        foreach (ThingDef d in new[] { sniper, pistol })
+                        {
+                            reborn.AddSlot(new LoadoutSlot(d, 1));
+                        }
+                        if (reborn.UniqueID == deadId)
+                        {
+                            dockie.SetLoadout(reborn);
+                            ForceReconcile(dockie);
+                            var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                            reusedIdKeptRules = rec != null
+                                && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        }
+                        else
+                        {
+                            // CE stopped reusing ids — the hazard is gone by upstream
+                            // change; record that rather than failing.
+                            reusedIdKeptRules = false;
+                        }
+                    }
+                    finally
+                    {
+                        dockie.SetLoadout(loadout);
+                        if (reborn != null)
+                        {
+                            LoadoutManager.RemoveLoadout(reborn);
+                        }
+                        ForceReconcile(dockie);
+                    }
+                },
+                checks =
+                {
+                    C("the-dead-loadouts-rules-do-not-govern-the-reborn-one", () =>
+                    {
+                        return (!reusedIdKeptRules, $"stale rules survived={reusedIdKeptRules}");
+                    }),
+                }
+            });
+
+            // The positive control for the job downgrade: a NON-excluded fetch with an
+            // empty primary must end WIELDED via CE's own Equip branch. Without this, an
+            // over-broad downgrade (every fetch becomes a haul, pawns never auto-wield)
+            // survived the whole suite — the refused-to-machine phase self-arms from
+            // inventory and masked it.
+            phases.Add(new Phase
+            {
+                label = "a-non-excluded-fetch-is-wielded-by-the-machine",
+                deadlineTicks = 25000,
+                minTicks = 300,
+                poll = () => ForceReconcile(dockie),
+                arrange = () => Baseline(dockie, loadout, sniper),
+                mutate = () =>
+                {
+                    dockie.equipment.DestroyAllEquipment();
+                    foreach (ThingWithComps w in dockie.inventory.innerContainer
+                                 .OfType<ThingWithComps>().Where(t => t.def == sniper).ToList())
+                    {
+                        dockie.inventory.innerContainer.Remove(w);
+                        w.Destroy();
+                    }
+                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    GenSpawn.Spawn(ThingMaker.MakeThing(sniper),
+                        CellFinder.RandomClosewalkCellNear(dockie.Position, dockie.Map, 4),
+                        dockie.Map);
+                },
+                checks =
+                {
+                    C("ce-wields-the-fetched-sniper", () =>
+                    {
+                        bool wielded = dockie.equipment?.Primary?.def == sniper;
+                        return (wielded, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
                     }),
                 }
             });

@@ -27,6 +27,12 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
     dotnet build "$REPO/test/StagingMod/Source/SupplyTestStaging.csproj" -c Release
 fi
 
+CFG="$SAVEDATA/Config/Mod_CESidearmsSupply_SupplyMod.xml"
+if [[ -f "$CFG" ]] && grep -qE "<loadoutWeaponsAsSidearms>False</|<releasePending>True</" "$CFG"; then
+    echo "== MOD CONFIG POISONED before launch — a previous run left non-default settings ==" >&2
+    grep -E "loadoutWeaponsAsSidearms|releasePending" "$CFG" >&2
+    exit 1
+fi
 rm -f "$SAVEDATA/test-results-$SCENARIO-iso-"*.json
 
 run_one() {

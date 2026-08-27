@@ -19,7 +19,7 @@ phase that was never reached is not marked failed — so a run that stopped earl
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, currently in 37 phases (one DLC-gated — the outfit-stand phase self-skips without its JobDef): initial reconcile and physical fetch (memory contents,
+`supply1` covers, currently in 40 phases (one DLC-gated — the outfit-stand phase self-skips without its JobDef): initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -172,7 +172,7 @@ not a test.
   belongs to the compat repo's suite when that repo is next active.
 - The outfit-stand equip path is driven at the recorder's contract level (a
   playerForced UseOutfitStand job around a real AddEquipment), not through a real
-  stand + driver; equipping an excluded weapon from an actual stand is a manual test.
+  stand + driver; equipping an excluded weapon from an actual stand is a manual test — NOT YET RUN anywhere (the dev environment lacks the DLC, so the phase and the recorder clause both ship with zero executions).
 - Drafted-side state is partially covered: the drafted gizmo's force branch has a phase
   (forcing an excluded weapon withdraws the exclusion); `ForcedWeaponWhileDrafted`
   surviving a release and the drafted reconcile-cadence gap still have none.

@@ -38,7 +38,15 @@ build() {
     dotnet build "$REPO/Source/CESidearmsSupply/CESidearmsSupply.csproj" -c Release -v q --nologo >/dev/null
     dotnet build "$REPO/test/StagingMod/Source/SupplyTestStaging.csproj" -c Release -v q --nologo >/dev/null
 }
+CFG="$COMPAT/test/SaveData/Config/Mod_CESidearmsSupply_SupplyMod.xml"
 run()   { SKIP_BUILD=1 "$REPO/test/run-supply-assert.sh" supply1 SUPPLY-1-loadout-sidearms >/dev/null 2>&1 || true; }
+poison_check() {
+    if [[ -f "$CFG" ]] && grep -qE "<loadoutWeaponsAsSidearms>False</|<releasePending>True</" "$CFG"; then
+        echo "!! mod config POISONED by this leg — the next leg would judge a feature-off world" >&2
+        grep -E "loadoutWeaponsAsSidearms|releasePending" "$CFG" >&2
+        exit 1
+    fi
+}
 
 phase_state() {
     python3 - "${1:-$RESULT}" "$PHASE" <<'PY'
@@ -51,8 +59,12 @@ for ph in d["phases"]:
         elif ph.get("passed"):
             print("passed")
         else:
-            gating = [c for c in ph.get("checks", []) if not c.get("informational")]
-            if gating and all(c.get("detail") in (None, "") for c in gating):
+            gating = [c for c in ph.get("checks", [])
+                      if not c.get("informational") and not c.get("precondition")]
+            def _unevaluated(c):
+                d = c.get("detail") or ""
+                return d == "not evaluated" or d.startswith("mutation threw")
+            if gating and all(_unevaluated(c) for c in gating):
                 # failed with zero evaluated checks: setup/mutate threw before anything
                 # was observed — pins an API signature, not the semantics.
                 print("unevaluated")
@@ -80,27 +92,29 @@ else
     git -C "$REPO" checkout -q "$REF" -- "${FILES[@]}"
     restore() { git -C "$REPO" checkout -q HEAD -- "${FILES[@]}"; }
 fi
-trap restore EXIT
+cleanup() { restore; build; }
+trap cleanup EXIT
 
 # A stale quarantine file must never answer for a leg that did not run.
 rm -f "$AB_A"
 if ! build; then
-    restore; trap - EXIT; build
+    cleanup; trap - EXIT
     echo "!! A: the tree does not BUILD without the fix — the pair shares an API, so this" >&2
     echo "!! A/B pins the signature, not the semantics. Verify with an in-place scratch" >&2
     echo "!! mutation instead." >&2
     exit 1
 fi
 run
+poison_check
 if [[ ! -f "$RESULT" ]]; then
-    restore; trap - EXIT; build
+    cleanup; trap - EXIT
     echo "!! A: the run produced no result file (crash/timeout before WriteResults) —" >&2
     echo "!! nothing was observed; not evidence about the fix." >&2
     exit 1
 fi
 mv -f "$RESULT" "$AB_A"
 A=$(phase_state "$AB_A" || echo absent)
-restore; trap - EXIT
+cleanup; trap - EXIT
 # The A leg built the mod from the reverted source; rebuild on EVERY path out —
 # including a crashed run — or the tree keeps a stale DLL that poisons the next build.
 build
@@ -118,6 +132,7 @@ esac
 
 echo "== B: fix restored, expecting the WHOLE suite to pass =="
 run
+poison_check
 if [[ "$(phase_state)" != "passed" ]]; then
     echo "!! B: '$PHASE' is $(phase_state) with the fix in place" >&2
     exit 1

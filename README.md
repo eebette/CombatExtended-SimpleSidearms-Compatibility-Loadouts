@@ -76,8 +76,9 @@ row; any of those puts it back under loadout management immediately. Exclusions 
 to the loadout assignment: assigning a different loadout (or losing the current one)
 clears them all, along with any hand-cleared roles — they are per-assignment rules, not
 permanent flags, and they do not come back when the old loadout does. While one is
-active, Simple Sidearms' own gizmo shows the weapon with its blocked cross and the
-reason.
+active, the weapon shows in Simple Sidearms' gizmo as an unmemorised entry — carried,
+demoted out of the sidearm list — and clicking it there puts it back, like any other
+unmemorised weapon.
 
 Generic slots ("any ranged weapon") are ignored — there is no specific def to remember —
 and so are CE's modular weapon platforms, whose attachments cannot be captured in the
