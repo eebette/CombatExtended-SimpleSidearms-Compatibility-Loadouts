@@ -420,8 +420,12 @@ namespace CESidearmsSupply.Patches
         /// made the pawn physically swap weapons. The pair currently holding the role wins
         /// outright: it is one value, so it can actually discriminate between two materials
         /// of one def — a list of previously-claimed pairs contained both candidates and
-        /// the preference collapsed back to inventory order. It also means a player's
-        /// hand-set role on a declared weapon is its own proof against the next pass.
+        /// the preference collapsed back to inventory order. Scope, honestly: the pin
+        /// only sees the FIRST declared def of the category that has candidates, so a
+        /// hand-set role sticks when it names that leading def (its material is then
+        /// pinned); a role on a later declared def yields to loadout order on the next
+        /// pass — by design, and pinned by the yields-to-loadout phase. Reorder the
+        /// loadout or force the weapon to keep a later pick.
         ///
         /// A fresh pick uses Simple Sidearms' own "best copy" key — market value,
         /// descending, the ordering equipSpecificWeaponTypeFromInventory applies when

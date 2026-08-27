@@ -67,8 +67,7 @@ hunting a specific stuff the loadout never asked for.
 **Forget a declared weapon in SS's gizmo and it stays forgotten** — that is how you say *carry
 this but don't wield it*, which removing the loadout row cannot express (that would stop the
 pawn carrying it at all). The game will not arm the pawn with it on its own: CE's inventory
-picks and its loadout equip jobs are refused (the one place you can see the block is the
-inventory tab's Equip entry, which names the reason), and Simple Sidearms' own switching —
+picks and its loadout equip jobs are refused, and Simple Sidearms' own switching —
 idle re-arm, the melee swap when an enemy closes — skips it too. CE still hauls it for the
 loadout row exactly as before. To undo it: equip the weapon yourself — from the map
 right-click menu, the inventory tab, or the caravan gear tab — click it back into the

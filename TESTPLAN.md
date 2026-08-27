@@ -27,11 +27,12 @@ an undeclared equipped weapon keeping the role while carried and the loadout tak
 it is stowed, and the gizmo-forget suppression sticking and then resuming when the weapon is
 put back in the list.
 
-Phases 12-15 and 17 are the regressions from the 2026-08-23 review; 16 and 18-20 cover the
-exclusion design (#37); the final six cover the 2026-08-26 review's findings — the
-haul-back guarantee, the machine-equip asymmetry, the inventory-tab path, Release()'s
-scope, duplicate-memory handling, and the eligibility gate; later rounds added the
-exclusion-integrity, release-lifecycle, player-surface and patch-inventory phases.
+Phase groups, by origin (indexes shift as phases are added — go by label): the 2026-08-23
+review's regressions, the exclusion design (#37), the 2026-08-26 review's findings
+(haul-back, machine-equip asymmetry, inventory-tab path, Release() scope,
+duplicate-memory handling, eligibility gate), and the later rounds' additions
+(exclusion-integrity, release-lifecycle, player-surface, patch-inventory,
+selection-ban and per-assignment-exclusion phases).
 Persistence claims are `N()` checks over windows — some drive the window with a `poll`
 action re-running the reconcile, others hold across natural cadence only; setup facts
 are `P()` preconditions; one-shot outcomes are `C()`, sampled at the act when the state
@@ -85,8 +86,8 @@ plus some FMJ rifle ammo rows. Assign loadout.
   at 1x) per pawn, run at the pawn's next job selection; the Assign tab's loadout-column
   button ("update now"/Rearm) triggers it instantly and is the fastest test lever — the SS
   gizmo shows all four weapons remembered; default ranged = sniper; preferred melee =
-  gladius; combat mode = ranged (only if it was BySkill before — a hand-set mode must
-  survive).
+  gladius. (The module never touches SS's combat mode — primaryWeaponMode is the
+  player's, full stop.)
 - Reorder shotgun to top → default ranged flips to shotgun on next reconcile.
 - Manually set pistol as default ranged via gizmo → reorder loadout again → the loadout's
   first ranged weapon takes the role back (a hand-set role on a DECLARED weapon yields to
