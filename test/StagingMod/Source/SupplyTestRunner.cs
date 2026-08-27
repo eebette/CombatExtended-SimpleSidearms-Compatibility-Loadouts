@@ -1530,14 +1530,30 @@ namespace CESupplyTestStaging
                 minTicks = 900,
                 poll = () =>
                 {
-                    // Confirm the gesture's drop half (it can fail quietly) and drive the
-                    // window: the never-re-claimed negative means nothing unless
-                    // reconciles actually run while the shotgun is back in the inventory.
-                    if (!gizmoForgetShotgunDropped
-                        && !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                               .Any(w => w.def == shotgun))
+                    // Retry a quietly-failed drop, confirming on the retry's OWN result —
+                    // a poll-boundary re-check races the re-haul (a drop can land and come
+                    // back inside one gap). The mutate already sampled the gesture's drop
+                    // at the act.
+                    if (!gizmoForgetShotgunDropped)
                     {
-                        gizmoForgetShotgunDropped = true;
+                        ThingWithComps t2 = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .FirstOrDefault(w => w.def == shotgun);
+                        if (t2 == null)
+                        {
+                            gizmoForgetShotgunDropped = true;
+                        }
+                        else if (dockie.equipment?.Primary == t2)
+                        {
+                            if (dockie.equipment.TryDropEquipment(t2, out _, dockie.Position, forbid: false))
+                            {
+                                gizmoForgetShotgunDropped = true;
+                            }
+                        }
+                        else if (dockie.inventory?.innerContainer?.TryDrop(t2, dockie.Position, dockie.Map,
+                                     ThingPlaceMode.Near, out _) ?? false)
+                        {
+                            gizmoForgetShotgunDropped = true;
+                        }
                     }
                     ForceReconcile(dockie);
                 },
@@ -1558,8 +1574,19 @@ namespace CESupplyTestStaging
                         loadout.AddSlot(new LoadoutSlot(shotgun, 1));
                     }
                     ForceReconcile(dockie);
+                    // Sampled AT the act: "on the ground" is momentary by design — the
+                    // re-haul can land inside one poll gap (it did, isolated), so a
+                    // poll-boundary confirm races the exact behaviour this phase proves.
+                    bool wasCarriedBefore = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .Any(w => w.def == shotgun);
                     InGizmo(() => WeaponAssingment.DropSidearm(dockie, carried,
                                                               intentionalDrop: true, unmemorise: true));
+                    if (wasCarriedBefore
+                        && !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                               .Any(w => w.def == shotgun))
+                    {
+                        gizmoForgetShotgunDropped = true;
+                    }
                     ForceReconcile(dockie);
                     ForceReconcile(dockie);
                 },
