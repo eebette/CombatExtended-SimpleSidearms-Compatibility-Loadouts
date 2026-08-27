@@ -45,9 +45,12 @@ never lists are not touched.
 
 Two things outrank the loadout, both because they are explicit:
 
-- **Forcing a weapon** (SS's force gizmo) and **"prefer unarmed"** are never touched. SS
-  checks a forced weapon before any default, and its role setters would clear these as a side
-  effect, so the projection stays out of the way entirely.
+- **Forcing a weapon** (SS's force gizmo) and **"prefer unarmed"** are never touched *by the
+  projection*: SS checks a forced weapon before any default, and its role setters would clear
+  these as a side effect, so the reconcile stays out of the way entirely. Your own equip
+  gestures follow Simple Sidearms' normal rules — hand-equipping a weapon that is not yet in
+  the sidearm list makes it the category default and clears a same-category force, exactly as
+  it would when equipped from the ground.
 - **A weapon you equip that the loadout doesn't list** keeps the role for as long as the pawn
   is carrying it. Put it away and the loadout's first takes over — SS ignores a role pointing
   at a weapon the pawn hasn't got, and would otherwise fall back to picking by raw DPS.

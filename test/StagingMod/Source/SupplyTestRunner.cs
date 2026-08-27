@@ -848,6 +848,7 @@ namespace CESupplyTestStaging
             bool featureOffHadClaims = false;
             bool forceWithdrewExclusion = false;
             bool tabSwitchVetoLifted = false;
+            bool tabSwitchClearedForce = false;
             bool failedSwitchKeptExclusion = false;
             bool failedSwitchNotRemembered = false;
             bool releaseLeftNoClaims = false;
@@ -2130,6 +2131,12 @@ namespace CESupplyTestStaging
                     // A hand-cleared role, so the phase also proves the recorder lifts the
                     // matching veto: a tab equip is the player's word on both fronts.
                     PlayerClearsRangedRole(dockie);
+                    // And a same-category force: ruling #40(b) — a hand-equip of a weapon
+                    // not yet in the sidearm list follows SS's normal rules, which clear
+                    // it, exactly as from the ground. Pinned so a future protect-the-force
+                    // change shows up red instead of sliding in silently.
+                    InGizmo(() => Mem(dockie).SetWeaponAsForced(
+                        new ThingDefStuffDefPair(sniper, null), drafted: false));
                 },
                 mutate = () =>
                 {
@@ -2150,6 +2157,7 @@ namespace CESupplyTestStaging
                         tabSwitchRole = Mem(dockie).DefaultRangedWeapon?.thing == pistol;
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
                         tabSwitchVetoLifted = rec != null && !rec.rangedRoleVetoed;
+                        tabSwitchClearedForce = Mem(dockie).ForcedWeapon == null;
                     }
                 },
                 checks =
@@ -2181,6 +2189,12 @@ namespace CESupplyTestStaging
                     C("the-role-veto-was-lifted-at-the-click", () =>
                     {
                         return (tabSwitchVetoLifted, $"veto lifted={tabSwitchVetoLifted}");
+                    }),
+                    C("the-same-category-force-was-cleared-ss-style", () =>
+                    {
+                        // Ruling #40(b): the vanilla-SS mirror stands — equipping a weapon
+                        // not yet in the list clears a same-category force.
+                        return (tabSwitchClearedForce, $"force cleared={tabSwitchClearedForce}");
                     }),
                 }
             });
