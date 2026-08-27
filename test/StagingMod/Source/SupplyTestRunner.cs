@@ -2620,7 +2620,11 @@ namespace CESupplyTestStaging
                         }
                     }
                     dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
-                    PlayerForgets(dockie, sniper);
+                    // The PISTOL is the picker's favourite at unspecified range (CE DPS:
+                    // short warmup beats the sniper's), so the exclusion must sit on IT —
+                    // excluding the sniper tempted nobody and the A leg passed without
+                    // the fix.
+                    PlayerForgets(dockie, pistol);
                     // No ranged role, so SS's picker path (findBestRangedWeapon) is the
                     // live one — the exact path that reads carried weapons raw.
                     PlayerClearsRangedRole(dockie);
@@ -2642,17 +2646,17 @@ namespace CESupplyTestStaging
                     WeaponAssingment.equipBestWeaponFromInventoryByPreference(
                         dockie, PeteTimesSix.SimpleSidearms.Utilities.Enums.DroppingModeEnum.Calm,
                         PeteTimesSix.SimpleSidearms.Utilities.Enums.PrimaryWeaponMode.Ranged);
-                    orderedSwapSkippedExcluded = dockie.equipment?.Primary?.def != sniper;
-                    orderedSwapPickedRunnerUp = dockie.equipment?.Primary?.def == pistol;
+                    orderedSwapSkippedExcluded = dockie.equipment?.Primary?.def != pistol;
+                    orderedSwapPickedRunnerUp = dockie.equipment?.Primary?.def == sniper;
                 },
                 checks =
                 {
-                    P("sniper-is-excluded-and-carried", () =>
+                    P("the-pickers-favourite-is-excluded-and-carried", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == sniper);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                            .Any(w => w.def == sniper);
+                            .Any(w => w.def == pistol);
                         return (excluded && carried, $"excluded={excluded} carried={carried}");
                     }),
                     C("the-order-was-player-forced", () =>
