@@ -4,8 +4,8 @@
         <TargetFramework>net48</TargetFramework>
         <LangVersion>latest</LangVersion>
         <Nullable>disable</Nullable>
-        <AssemblyName>CESidearmsSupply</AssemblyName>
-        <RootNamespace>CESidearmsSupply</RootNamespace>
+        <AssemblyName>CESimpleSidearmsCompat.Loadouts</AssemblyName>
+        <RootNamespace>CESimpleSidearmsCompat.Loadouts</RootNamespace>
         <OutputPath>..\..\Assemblies\</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <DebugType>none</DebugType>

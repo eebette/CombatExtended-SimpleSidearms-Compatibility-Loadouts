@@ -9,7 +9,7 @@ using RimWorld;
 using SimpleSidearms.rimworld;
 using Verse;
 
-namespace CESidearmsSupply.Patches
+namespace CESimpleSidearmsCompat.Loadouts.Patches
 {
     /// <summary>
     /// Records what the player asked for, at the one place in Simple Sidearms where "the
@@ -76,7 +76,7 @@ namespace CESidearmsSupply.Patches
         /// </summary>
         internal static bool ManagedPawn(Pawn pawn)
         {
-            if (pawn == null || !pawn.IsColonist || !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+            if (pawn == null || !pawn.IsColonist || !LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
             {
                 return false;
             }

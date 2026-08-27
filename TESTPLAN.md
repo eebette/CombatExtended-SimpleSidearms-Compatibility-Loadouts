@@ -153,9 +153,9 @@ not a test.
   `Log.ErrorOnce` that fires during load is pre-baselined, so the "any ErrorOnce is a
   failure" rule below is enforceable only for first occurrences after load; errors
   after the last phase are never read.
-- `SupplySessionComponent`'s deferred release runs at load, before any phase, so the
+- `LoadoutsSessionComponent`'s deferred release runs at load, before any phase, so the
   releasePending's arming is covered (the toggle-off phase asserts the flag is set when
-  the feature goes off in-game); the once-per-load consumer, SupplySessionComponent
+  the feature goes off in-game); the once-per-load consumer, LoadoutsSessionComponent
   .FinalizeInit, still has no in-suite coverage — it runs before the runner does.
 - SS's own UI branch dispatch is not exercised: phases enter the gizmo scope directly
   (`InGizmo` raises it around the SS memory call) rather than driving
@@ -192,11 +192,11 @@ not a test.
 
 - Pawn with default loadout: zero behavior change, no records created.
 - Save/load mid-state: template records persist.
-- Uninstalling mid-save is NOT fully quiet. The per-pawn state (two `ceSupply_*` nodes on
+- Uninstalling mid-save is NOT fully quiet. The per-pawn state (two `cessLoadouts_*` nodes on
   each humanlike pawn) is dropped silently when the comp class is absent — but
-  `SupplySessionComponent` is serialized into the save's game-component list by class
+  `LoadoutsSessionComponent` is serialized into the save's game-component list by class
   name, so the first load without the mod logs one red "Could not find class
-  CESidearmsSupply.SupplySessionComponent" error (the node is a single self-closing
+  CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent" error (the node is a single self-closing
   element; RimWorld discards it and continues, and the save is clean after re-saving).
   Sidearm memories the mod wrote remain as ordinary SS data; "Release all claimed
   sidearms" before uninstalling clears them.

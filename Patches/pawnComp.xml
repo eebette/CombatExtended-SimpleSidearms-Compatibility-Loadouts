@@ -12,14 +12,14 @@
             <xpath>/Defs/ThingDef[thingClass="Pawn"]</xpath>
             <value>
                 <comps>
-                    <li Class="CESidearmsSupply.CompProperties_LoadoutSidearms"></li>
+                    <li Class="CESimpleSidearmsCompat.Loadouts.CompProperties_LoadoutSidearms"></li>
                 </comps>
             </value>
         </nomatch>
         <match Class="PatchOperationAdd">
             <xpath>/Defs/ThingDef[thingClass="Pawn"]/comps</xpath>
             <value>
-                <li Class="CESidearmsSupply.CompProperties_LoadoutSidearms"></li>
+                <li Class="CESimpleSidearmsCompat.Loadouts.CompProperties_LoadoutSidearms"></li>
             </value>
         </match>
     </Operation>

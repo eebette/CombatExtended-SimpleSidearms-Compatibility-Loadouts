@@ -120,7 +120,7 @@ namespace CESupplyTestStaging
             Func<int> reconcile = () => giver.TryGiveJob(pawn) != null ? 1 : 0;
 
             double patched = Measure(reconcile);
-            new Harmony("eebette.CESidearmsSupplyBench").UnpatchAll("eebette.CESidearmsSupply");
+            new Harmony("eebette.CESimpleSidearmsCompat.LoadoutsBench").UnpatchAll("eebette.CESimpleSidearmsCompat.Loadouts");
             Log.Message("[SupplyBench] Module patches removed; measuring stock CE.");
             double stock = Measure(reconcile);
 
@@ -233,7 +233,7 @@ namespace CESupplyTestStaging
             // The staging assembly has no Harmony bootstrap of its own, so the call counter
             // below is only applied for bench runs — and without this it silently never runs,
             // which is exactly how the first measurement reported a rate of 0.00.
-            new Harmony("eebette.CESidearmsSupplyBench").PatchAll(typeof(SupplyBenchBoot).Assembly);
+            new Harmony("eebette.CESimpleSidearmsCompat.LoadoutsBench").PatchAll(typeof(SupplyBenchBoot).Assembly);
 
             if (GenCommandLine.TryGetCommandLineArg("celoadsave", out string save) && !save.NullOrEmpty())
             {

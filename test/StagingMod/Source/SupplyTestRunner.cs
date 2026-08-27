@@ -577,7 +577,7 @@ namespace CESupplyTestStaging
             // run CE's own loadout enforcement — which physically drops equipment and
             // inventory and rewrites CE's throttle — so a phase calling this twice was doing
             // two rounds of CE enforcement rather than two reconciles.
-            CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(pawn);
+            CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(pawn);
         }
 
         private static List<LoadoutSlot> Stream(Pawn pawn)
@@ -607,7 +607,7 @@ namespace CESupplyTestStaging
                 eval = () =>
                 {
                     CompSidearmMemory m = Mem(pawn);
-                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(pawn);
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(pawn);
                     string mem = string.Join(",", m.RememberedWeapons.Select(pr => pr.thing?.defName));
                     string clm = rec == null ? "-" : string.Join(",", rec.claimed.Select(pr => pr.thing?.defName));
                     string exc = rec == null ? "-" : string.Join(",", rec.dontEquip.Select(pr => pr.thing?.defName));
@@ -647,7 +647,7 @@ namespace CESupplyTestStaging
         private static void Baseline(Pawn pawn, Loadout loadout, params ThingDef[] rows)
         {
             CompSidearmMemory memory = Mem(pawn);
-            var rec = CESidearmsSupply.CompLoadoutSidearms.For(pawn);
+            var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(pawn);
 
             // Loadout-level flags are shared state a phase can mutate (one did, and every
             // later sequenced phase then ran adHoc-off while the isolated runs ran
@@ -779,8 +779,8 @@ namespace CESupplyTestStaging
         // make the call SS's own branch would make. The hooks under test are the real ones.
         private static void InGizmo(Action act)
         {
-            CESidearmsSupply.Patches.PlayerIntent.Enter();
-            try { act(); } finally { CESidearmsSupply.Patches.PlayerIntent.Exit(); }
+            CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.Enter();
+            try { act(); } finally { CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.Exit(); }
         }
 
         private static void PlayerForgets(Pawn pawn, ThingDef def)
@@ -803,8 +803,8 @@ namespace CESupplyTestStaging
 
         private static bool InChoice(Func<bool> probe)
         {
-            CESidearmsSupply.Patches.PlayerIntent.EnterChoice();
-            try { return probe(); } finally { CESidearmsSupply.Patches.PlayerIntent.ExitChoice(); }
+            CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.EnterChoice();
+            try { return probe(); } finally { CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ExitChoice(); }
         }
 
         private static void PlayerClearsRangedRole(Pawn pawn)
@@ -1139,7 +1139,7 @@ namespace CESupplyTestStaging
                         // passed because ForceReconcile ran CE's entire TryGiveJob and that
                         // physically drops inventory. Calling the reconcile directly removed
                         // the side effect and left the check resting on an escape hatch.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == revolver);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == revolver);
                         return (!remembered && !claimed,
@@ -1232,7 +1232,7 @@ namespace CESupplyTestStaging
                         // path can produce, so it passed with the feature deleted. The real
                         // invariant is that claimed matches what the loadout declares and the
                         // pawn holds, nothing more and nothing less.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                             .Select(w => w.def).ToHashSet();
                         var declaredNow = loadout.Slots.Where(sl => sl.thingDef != null && sl.thingDef.IsWeapon)
@@ -1250,7 +1250,7 @@ namespace CESupplyTestStaging
                         // EQUIPPING. Simple Sidearms' retrieval brings a weapon back to the
                         // inventory, not to their hands, so restoring it as the role would be
                         // inferring intent from an automatic action. Equip it again to lead.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = playerPick != null && rec != null
                                        && rec.claimed.Any(p => p.thing == playerPick.def);
                         return (playerPick != null && !claimed,
@@ -1291,13 +1291,13 @@ namespace CESupplyTestStaging
                         // declared, so CE may equip the pistol as primary and SS re-remembers
                         // it through InformOfAddedPrimary with nothing of ours involved; that
                         // exact over-assertion made the sister phase flake on CE's timing.
-                        var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var recNow = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = recNow != null && recNow.claimed.Any(p => p.thing == pistol);
                         return (!claimed, $"pistol re-claimed by the projection={claimed}");
                     }),
                     C("recorded-as-player-intent", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         return (excluded, $"recorded as do-not-equip={excluded}");
                     }),
@@ -1343,13 +1343,13 @@ namespace CESupplyTestStaging
                 {
                     P("pistol-starts-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
                     C("suppression-cleared", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == pistol);
                         return (!excluded && claimed, $"dontEquip={excluded} claimed={claimed}");
@@ -1412,7 +1412,7 @@ namespace CESupplyTestStaging
                     {
                         // Empty, not merely sniper-free: the defect fires on whatever the
                         // outgoing primary was, and asserting one def let it hide.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         int n = rec?.dontEquip.Count ?? 0;
                         return (n == 0, $"dontEquip has {n} entr(y/ies)");
                     }),
@@ -1612,7 +1612,7 @@ namespace CESupplyTestStaging
                 {
                     C("recorded-as-do-not-equip", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == shotgun);
                         return (excluded, $"shotgun in dontEquip={excluded}");
                     }),
@@ -1634,13 +1634,13 @@ namespace CESupplyTestStaging
                         // JustBeforeEquip then remembers it through InformOfAddedPrimary with
                         // nothing of ours involved. Asserting against that made this phase
                         // fail or pass on CE's equip timing.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == shotgun);
                         return (!claimed, $"shotgun re-claimed by the projection={claimed}");
                     }),
                     C("forget-forensics", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         string excl = rec == null ? "no-record"
                             : string.Join(",", rec.dontEquip.Select(p => $"{p.thing?.defName}/{p.stuff?.defName ?? "null"}"));
                         string mem = string.Join(",", Mem(dockie).RememberedWeapons
@@ -1684,7 +1684,7 @@ namespace CESupplyTestStaging
                 },
                 mutate = () =>
                 {
-                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     beforeDelete = (rec?.claimed ?? new List<ThingDefStuffDefPair>())
                         .Select(pr => pr.thing.defName).ToHashSet();
                     LoadoutManager.RemoveLoadout(loadout);
@@ -1700,13 +1700,13 @@ namespace CESupplyTestStaging
                     }),
                     P("there-were-claims-to-release", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         int n = rec?.claimed.Count ?? 0;
                         return (n > 0, $"claims={n}");
                     }),
                     C("the-claims-are-handed-back", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         int n = rec?.claimed.Count ?? 0;
                         bool stillRemembered = Mem(dockie).RememberedWeapons
                             .Any(pr => beforeDelete.Contains(pr.thing.defName));
@@ -1754,13 +1754,13 @@ namespace CESupplyTestStaging
                     }),
                     C("row-round-trip-clears-it", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == pistol);
                         return (!excluded, $"still excluded={excluded}");
                     }),
                     C("exclusion-forensics", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         string excl = rec == null ? "no-record"
                             : string.Join(",", rec.dontEquip.Select(p => p.thing?.defName));
                         string clm = rec == null ? "-"
@@ -1774,7 +1774,7 @@ namespace CESupplyTestStaging
                     }, informational: true),
                     C("and-the-pistol-is-managed-again", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(p => p.thing == pistol);
                         bool remembered = Mem(dockie).RememberedWeapons.Any(p => p.thing == pistol);
                         return (claimed && remembered, $"claimed={claimed} remembered={remembered}");
@@ -1783,7 +1783,7 @@ namespace CESupplyTestStaging
                 mutate = () =>
                 {
                     PlayerForgets(dockie, pistol);
-                    var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var recNow = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     pistolWasExcluded = recNow != null && recNow.dontEquip.Any(p => p.thing == pistol);
 
                     // No drop in between: the pawn keeps carrying it throughout, so this also
@@ -1851,7 +1851,7 @@ namespace CESupplyTestStaging
                 {
                     P("pistol-is-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -1925,7 +1925,7 @@ namespace CESupplyTestStaging
                 {
                     P("pistol-starts-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -1941,7 +1941,7 @@ namespace CESupplyTestStaging
                     }),
                     C("exclusion-withdrawn", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (!excluded, $"still excluded={excluded}");
                     }),
@@ -2015,7 +2015,7 @@ namespace CESupplyTestStaging
                 {
                     C("shotgun-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == shotgun);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -2034,7 +2034,7 @@ namespace CESupplyTestStaging
                     }),
                     N("and-it-is-never-re-claimed", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == shotgun);
                         return (!claimed, $"re-claimed={claimed}");
                     }),
@@ -2105,7 +2105,7 @@ namespace CESupplyTestStaging
                 {
                     P("pistol-was-excluded-first", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -2115,7 +2115,7 @@ namespace CESupplyTestStaging
                     }),
                     N("exclusion-survives-the-machine-equip", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"still excluded={excluded}");
                     }),
@@ -2160,7 +2160,7 @@ namespace CESupplyTestStaging
                         // correct behaviour.
                         tabSwitchEquipped = dockie.equipment?.Primary?.def == pistol;
                         tabSwitchRole = Mem(dockie).DefaultRangedWeapon?.thing == pistol;
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         tabSwitchVetoLifted = rec != null && !rec.rangedRoleVetoed;
                         tabSwitchClearedForce = Mem(dockie).ForcedWeapon == null;
                     }
@@ -2169,7 +2169,7 @@ namespace CESupplyTestStaging
                 {
                     P("pistol-starts-excluded-and-carried", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                             .Any(w => w.def == pistol);
@@ -2182,7 +2182,7 @@ namespace CESupplyTestStaging
                     }),
                     C("exclusion-cleared", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (!excluded, $"still excluded={excluded}");
                     }),
@@ -2232,7 +2232,7 @@ namespace CESupplyTestStaging
                         dockie.inventory.innerContainer.Remove(t);
                         AccessTools.Method(typeof(CombatExtended.ITab_Inventory), "SyncedTrySwitchToWeapon")
                             .Invoke(null, new object[] { inv, t });
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         failedSwitchKeptExclusion = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         failedSwitchNotRemembered = !Mem(dockie).RememberedWeapons.Any(pr => pr.thing == pistol);
                         // Restore the world for the phases after this one.
@@ -2251,7 +2251,7 @@ namespace CESupplyTestStaging
                     }),
                     P("pistol-starts-excluded-and-carried", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                             .Any(w => w.def == pistol);
@@ -2280,18 +2280,18 @@ namespace CESupplyTestStaging
                 },
                 mutate = () =>
                 {
-                    CESidearmsSupply.SupplyMod.Release();
+                    CESimpleSidearmsCompat.Loadouts.LoadoutsMod.Release();
                     // Sampled AT the act: with the feature on, the next natural reconcile
                     // correctly re-claims, so "claims == 0 at the first poll" was a race
                     // with CE's cadence — a few runs in a hundred lost it.
-                    var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var recNow = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     releaseLeftNoClaims = (recNow?.claimed.Count ?? -1) == 0;
                 },
                 checks =
                 {
                     P("claims-and-an-exclusion-exist", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claims = rec != null && rec.claimed.Count > 0;
                         bool excl = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (claims && excl, $"claims={rec?.claimed.Count ?? 0} excluded={excl}");
@@ -2302,7 +2302,7 @@ namespace CESupplyTestStaging
                     }),
                     C("exclusion-kept", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excl = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excl, $"excluded={excl}");
                     }),
@@ -2371,7 +2371,7 @@ namespace CESupplyTestStaging
                         settings.SeparateModes = false;
                         settings.LimitModeSingle = PeteTimesSix.SimpleSidearms.Utilities.Enums.LimitModeSingleSidearm.Selection;
                         settings.LimitModeSingle_Selection = new HashSet<ThingDef>();
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         rec.claimed.Clear();
                         foreach (var pr in Mem(dockie).RememberedWeapons.ToList())
                         {
@@ -2392,7 +2392,7 @@ namespace CESupplyTestStaging
                     // or "nothing claimed under an empty whitelist" is indistinguishable
                     // from Target() claiming nothing under any settings at all.
                     claimsReturnedAfterRestore =
-                        (CESidearmsSupply.CompLoadoutSidearms.For(dockie)?.claimed.Count ?? 0) > 0;
+                        (CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie)?.claimed.Count ?? 0) > 0;
                 },
                 checks =
                 {
@@ -2442,7 +2442,7 @@ namespace CESupplyTestStaging
                     }
                     InGizmo(() => WeaponAssingment.DropSidearm(dockie, sn,
                         intentionalDrop: true, unmemorise: true));
-                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     sniperWasExcludedAtDrop = rec != null && rec.dontEquip.Any(pr => pr.thing == sniper);
                 },
                 checks =
@@ -2518,7 +2518,7 @@ namespace CESupplyTestStaging
                 {
                     P("two-materials-are-claimed", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         var pairs = rec == null ? new List<ThingDefStuffDefPair>()
                             : rec.claimed.Where(pr => pr.thing == gladius).ToList();
                         var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
@@ -2563,14 +2563,14 @@ namespace CESupplyTestStaging
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
-                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                    var settings = CESidearmsSupply.SupplyMod.Settings;
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
+                    var settings = CESimpleSidearmsCompat.Loadouts.LoadoutsMod.Settings;
                     bool wasPending = settings.releasePending;
                     featureOffHadClaims = rec != null && rec.claimed.Count > 0;
                     try
                     {
                         settings.loadoutWeaponsAsSidearms = false;
-                        CESidearmsSupply.SupplyMod.Release(interactive: true);
+                        CESimpleSidearmsCompat.Loadouts.LoadoutsMod.Release(interactive: true);
                         featureOffSweptThisColony = rec != null && rec.claimed.Count == 0;
                         featureOffArmedTheFlag = settings.releasePending;
                     }
@@ -2624,7 +2624,7 @@ namespace CESupplyTestStaging
                 },
                 mutate = () =>
                 {
-                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     ThingDefStuffDefPair? pr = rec?.dontEquip.FirstOrDefault(x => x.thing == pistol);
                     if (pr.HasValue && pr.Value.thing != null)
                     {
@@ -2640,7 +2640,7 @@ namespace CESupplyTestStaging
                 {
                     P("pistol-was-excluded-first", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(x => x.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -2675,7 +2675,7 @@ namespace CESupplyTestStaging
                     }),
                     C("the-emp-weapon-is-still-claimed", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(x => x.thing == D("Weapon_GrenadeEMP"));
                         return (claimed, $"claimed={claimed}");
                     }),
@@ -2701,7 +2701,7 @@ namespace CESupplyTestStaging
                         // written, exactly as predicted when it was reviewed.
                         var missing = new List<string>();
                         int total = 0;
-                        foreach (Type t in typeof(CESidearmsSupply.SupplyMod).Assembly.GetTypes())
+                        foreach (Type t in typeof(CESimpleSidearmsCompat.Loadouts.LoadoutsMod).Assembly.GetTypes())
                         {
                             var attrs = t.GetCustomAttributes(typeof(HarmonyPatch), inherit: true);
                             if (attrs.Length == 0)
@@ -2728,7 +2728,7 @@ namespace CESupplyTestStaging
                                 continue;
                             }
                             var patches = Harmony.GetPatchInfo(m);
-                            if (patches == null || !patches.Owners.Contains("eebette.CESidearmsSupply"))
+                            if (patches == null || !patches.Owners.Contains("eebette.CESimpleSidearmsCompat.Loadouts"))
                             {
                                 missing.Add(t.Name);
                             }
@@ -2817,7 +2817,7 @@ namespace CESupplyTestStaging
                 {
                     P("the-pickers-favourite-is-excluded-and-carried", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = orderedSwapFavourite != null && rec != null
                             && rec.dontEquip.Any(pr => pr.thing == orderedSwapFavourite);
                         bool carried = orderedSwapFavourite != null
@@ -2873,7 +2873,7 @@ namespace CESupplyTestStaging
                     {
                         dockie.SetLoadout(other);
                         ForceReconcile(dockie);
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         loadoutSwitchClearedAll = rec != null && rec.dontEquip.Count == 0
                             && !rec.rangedRoleVetoed && !rec.meleeRoleVetoed;
                         dockie.SetLoadout(loadout);
@@ -2891,7 +2891,7 @@ namespace CESupplyTestStaging
                 {
                     P("an-exclusion-and-a-veto-exist", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excl = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         bool veto = rec != null && rec.rangedRoleVetoed;
                         return (excl && veto, $"excluded={excl} vetoed={veto}");
@@ -2907,7 +2907,7 @@ namespace CESupplyTestStaging
                     C("the-pistol-is-claimed-again", () =>
                     {
                         // The positive control: with the exclusion gone, the row claims it.
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == pistol);
                         return (claimed, $"claimed={claimed}");
                     }),
@@ -2954,7 +2954,7 @@ namespace CESupplyTestStaging
                         }
                         dockie.inventory.innerContainer.Remove(pist);
                         dockie.equipment.AddEquipment(pist);
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         standEquipWithdrew = rec != null && !rec.dontEquip.Any(pr => pr.thing == pistol);
                     }
                     finally
@@ -2973,7 +2973,7 @@ namespace CESupplyTestStaging
                     }),
                     P("pistol-starts-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -3009,9 +3009,9 @@ namespace CESupplyTestStaging
                 {
                     try
                     {
-                        CESidearmsSupply.SupplyMod.Release(interactive: true);
+                        CESimpleSidearmsCompat.Loadouts.LoadoutsMod.Release(interactive: true);
                         var mem = Mem(dockie);
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         forcedPairSurvivedRelease =
                             mem.ForcedWeapon?.thing == shotgun
                             && mem.RememberedWeapons.Any(pr => pr.thing == shotgun);
@@ -3030,7 +3030,7 @@ namespace CESupplyTestStaging
                 {
                     P("the-shotgun-is-forced-and-claimed", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool forced = Mem(dockie).ForcedWeapon?.thing == shotgun;
                         bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == shotgun);
                         return (forced && claimed, $"forced={forced} claimed={claimed}");
@@ -3072,7 +3072,7 @@ namespace CESupplyTestStaging
                         // hook runs, which is exactly the destroyed-gesture window.
                         dockie.SetLoadout(fresh);
                         PlayerForgets(dockie, pistol);
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         gestureAfterAssignSurvived = rec != null
                             && rec.dontEquip.Any(pr => pr.thing == pistol);
                     }
@@ -3132,7 +3132,7 @@ namespace CESupplyTestStaging
                         {
                             dockie.SetLoadout(reborn);
                             ForceReconcile(dockie);
-                            var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                            var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                             reusedIdKeptRules = rec != null
                                 && rec.dontEquip.Any(pr => pr.thing == pistol);
                         }
@@ -3190,7 +3190,7 @@ namespace CESupplyTestStaging
                     // fire — the isolated run lost that race every time. With no memory,
                     // only CE's loadout machinery wants the sniper, and the equip branch
                     // is the sole path back to the pawn's hands.
-                    var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var recNow = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     recNow?.claimed.RemoveAll(pr => pr.thing == sniper);
                     Mem(dockie).RememberedWeapons.RemoveAll(pr => pr.thing == sniper);
                     GenSpawn.Spawn(ThingMaker.MakeThing(sniper),
@@ -3230,7 +3230,7 @@ namespace CESupplyTestStaging
                     {
                         Verse.AI.Job j = JobMaker.MakeJob(CombatExtended.CE_JobDefOf.TakeFromOther,
                             ground, dockie, dockie);   // A=thing, B=carrier, C=equip flag
-                        CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch
+                        CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch
                             .Postfix(dockie, ref j);
                         takeFlagCleared = j != null
                             && j.def == CombatExtended.CE_JobDefOf.TakeFromOther
@@ -3248,7 +3248,7 @@ namespace CESupplyTestStaging
                 {
                     P("the-sniper-is-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == sniper);
                         return (excluded, $"excluded={excluded}");
                     }),
@@ -3273,7 +3273,7 @@ namespace CESupplyTestStaging
                     {
                         Verse.AI.Job j = JobMaker.MakeJob(CombatExtended.CE_JobDefOf.TakeFromOther,
                             ground, dockie, dockie);
-                        CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch
+                        CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch
                             .Postfix(dockie, ref j);
                         takeFlagKept = j != null
                             && j.def == CombatExtended.CE_JobDefOf.TakeFromOther
@@ -3338,7 +3338,7 @@ namespace CESupplyTestStaging
                 {
                     P("the-favourite-blade-is-excluded", () =>
                     {
-                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                         bool excluded = inScopeFavourite != null && rec != null
                             && rec.dontEquip.Any(pr => pr.thing == inScopeFavourite);
                         return (excluded, $"favourite={inScopeFavourite?.defName ?? "none"} excluded={excluded}");
@@ -3368,7 +3368,7 @@ namespace CESupplyTestStaging
             {
                 phase.checks.Add(N("no-pair-is-both-excluded-and-remembered", () =>
                 {
-                    var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
                     if (rec == null || rec.dontEquip.Count == 0)
                     {
                         return (true, "no exclusions");

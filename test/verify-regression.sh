@@ -35,10 +35,10 @@ done
 # BOTH assemblies: an edited-but-unbuilt SupplyTestRunner.cs otherwise A/Bs the OLD
 # tests against both legs and still prints "verified".
 build() {
-    dotnet build "$REPO/Source/CESidearmsSupply/CESidearmsSupply.csproj" -c Release -v q --nologo >/dev/null
+    dotnet build "$REPO/Source/CESimpleSidearmsCompat.Loadouts/CESimpleSidearmsCompat.Loadouts.csproj" -c Release -v q --nologo >/dev/null
     dotnet build "$REPO/test/StagingMod/Source/SupplyTestStaging.csproj" -c Release -v q --nologo >/dev/null
 }
-CFG="$COMPAT/test/SaveData/Config/Mod_CESidearmsSupply_SupplyMod.xml"
+CFG="$COMPAT/test/SaveData/Config/Mod_CESidearmsSupply_LoadoutsMod.xml"
 run()   { SKIP_BUILD=1 "$REPO/test/run-supply-assert.sh" supply1 SUPPLY-1-loadout-sidearms >/dev/null 2>&1 || true; }
 poison_check() {
     if [[ -f "$CFG" ]] && grep -qE "<loadoutWeaponsAsSidearms>False</|<releasePending>True</" "$CFG"; then

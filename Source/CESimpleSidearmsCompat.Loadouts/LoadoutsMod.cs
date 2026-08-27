@@ -5,16 +5,19 @@ using SimpleSidearms.rimworld;
 using UnityEngine;
 using Verse;
 
-namespace CESidearmsSupply
+namespace CESimpleSidearmsCompat.Loadouts
 {
-    public class SupplySettings : ModSettings
+    public class LoadoutsSettings : ModSettings
     {
         public bool loadoutWeaponsAsSidearms = true;
 
         /// <summary>
-        /// Set when the feature is switched off with no game loaded. Settings are global and
-        /// records are per-save, so there is nothing to release at that moment — but every
-        /// save still holds claims that now have nobody to release them.
+        /// "The feature is off with unfinished cleanup." Armed whenever a release runs
+        /// with the feature off — the off-toggle (with or without a game loaded) and any
+        /// sweep that had to defer away pawns — and consumed once per load by
+        /// LoadoutsSessionComponent until the feature is turned back on. Settings are
+        /// global and records are per-save, so the flag is what carries the cleanup to
+        /// every other save.
         /// </summary>
         public bool releasePending;
 
@@ -26,13 +29,13 @@ namespace CESidearmsSupply
         }
     }
 
-    public class SupplyMod : Mod
+    public class LoadoutsMod : Mod
     {
-        public static SupplySettings Settings { get; private set; }
+        public static LoadoutsSettings Settings { get; private set; }
 
-        public SupplyMod(ModContentPack content) : base(content)
+        public LoadoutsMod(ModContentPack content) : base(content)
         {
-            Settings = GetSettings<SupplySettings>();
+            Settings = GetSettings<LoadoutsSettings>();
         }
 
         public override string SettingsCategory()
@@ -178,14 +181,14 @@ namespace CESidearmsSupply
     /// a notification chime forever), and the global flag was cleared after the first save
     /// so a second colony was never cleaned.
     /// </summary>
-    public class SupplySessionComponent : GameComponent
+    public class LoadoutsSessionComponent : GameComponent
     {
         /// <summary>Incremented by the reconcile prefix; consumed by the liveness canary.</summary>
         public static int reconcilePasses;
 
         private int lastLivenessTick;
 
-        public SupplySessionComponent(Game game)
+        public LoadoutsSessionComponent(Game game)
         {
         }
 
@@ -205,8 +208,8 @@ namespace CESidearmsSupply
             reconcilePasses = 0;
             bool firstWindow = lastLivenessTick == 0;
             lastLivenessTick = now;
-            if (firstWindow || hadPasses || SupplyMod.Settings == null
-                || !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+            if (firstWindow || hadPasses || LoadoutsMod.Settings == null
+                || !LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
             {
                 return;
             }
@@ -223,10 +226,10 @@ namespace CESidearmsSupply
         public override void FinalizeInit()
         {
             base.FinalizeInit();
-            if (SupplyMod.Settings != null && SupplyMod.Settings.releasePending
-                && !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+            if (LoadoutsMod.Settings != null && LoadoutsMod.Settings.releasePending
+                && !LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
             {
-                SupplyMod.Release();
+                LoadoutsMod.Release();
             }
         }
     }
@@ -257,7 +260,7 @@ namespace CESidearmsSupply
             // withdrawal recorders dead) under a message claiming it is fully off.
             // Per-class, one binding failure costs that class alone, with its own named
             // error — the same degrade contract every Prepare() already promises.
-            var harmony = new Harmony("eebette.CESidearmsSupply");
+            var harmony = new Harmony("eebette.CESimpleSidearmsCompat.Loadouts");
             int failedClasses = 0;
             foreach (System.Type type in typeof(Bootstrap).Assembly.GetTypes())
             {

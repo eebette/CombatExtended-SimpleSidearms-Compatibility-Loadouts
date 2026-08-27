@@ -107,7 +107,7 @@ by an ideoligion role, or any weapon on a pawn who cannot do violence — are st
 
 ## Building
 
-Same pattern as the compat patch: `dotnet build Source/CESidearmsSupply/CESidearmsSupply.csproj -c Release`.
+Same pattern as the compat patch: `dotnet build Source/CESimpleSidearmsCompat.Loadouts/CESimpleSidearmsCompat.Loadouts.csproj -c Release`.
 References the CE and SS workshop DLLs (`-p:RimWorldWorkshopDir=...` to override). The
 compatibility patch is a runtime dependency but not a build one — this module binds to no
 type in it. CI cannot build this repo; releases are manual.

@@ -10,7 +10,7 @@ using SimpleSidearms.rimworld;
 using Verse;
 using Verse.AI;
 
-namespace CESidearmsSupply.Patches
+namespace CESimpleSidearmsCompat.Loadouts.Patches
 {
     /// <summary>
     /// Loadout weapons as sidearms. Weapon defs listed in a pawn's CE loadout are remembered
@@ -68,8 +68,8 @@ namespace CESidearmsSupply.Patches
                 // this hook can execute inside an open gizmo-interaction scope (a click that
                 // ends a job restarts the think tree synchronously), and a release running
                 // there had its own forgets recorded as player exclusions. It now runs from
-                // SupplySessionComponent.FinalizeInit, once per load.
-                if (!SupplyMod.Settings.loadoutWeaponsAsSidearms)
+                // LoadoutsSessionComponent.FinalizeInit, once per load.
+                if (!LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
                 {
                     return;
                 }
@@ -100,7 +100,7 @@ namespace CESidearmsSupply.Patches
         {
             try
             {
-                if (__result == null || pawn == null || !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+                if (__result == null || pawn == null || !LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
                 {
                     return;
                 }

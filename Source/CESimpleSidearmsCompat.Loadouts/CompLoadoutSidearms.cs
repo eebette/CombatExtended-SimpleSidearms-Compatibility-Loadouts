@@ -4,7 +4,7 @@ using System.Linq;
 using SimpleSidearms.rimworld;
 using Verse;
 
-namespace CESidearmsSupply
+namespace CESimpleSidearmsCompat.Loadouts
 {
     public class CompProperties_LoadoutSidearms : CompProperties
     {
@@ -114,11 +114,11 @@ namespace CESidearmsSupply
             // A ThingComp has no node of its own — these are written as direct children of
             // the pawn's, sharing a namespace with every other comp on it. Prefixed so a
             // field called "claimed" on someone else's comp cannot resolve to ours.
-            Scribe_Collections.Look(ref claimed, "ceSupply_claimed", LookMode.Deep);
-            Scribe_Collections.Look(ref dontEquip, "ceSupply_dontEquip", LookMode.Deep);
-            Scribe_Values.Look(ref rangedRoleVetoed, "ceSupply_rangedRoleVetoed", false);
-            Scribe_Values.Look(ref meleeRoleVetoed, "ceSupply_meleeRoleVetoed", false);
-            Scribe_Values.Look(ref lastLoadoutId, "ceSupply_lastLoadoutId", -1);
+            Scribe_Collections.Look(ref claimed, "cessLoadouts_claimed", LookMode.Deep);
+            Scribe_Collections.Look(ref dontEquip, "cessLoadouts_dontEquip", LookMode.Deep);
+            Scribe_Values.Look(ref rangedRoleVetoed, "cessLoadouts_rangedRoleVetoed", false);
+            Scribe_Values.Look(ref meleeRoleVetoed, "cessLoadouts_meleeRoleVetoed", false);
+            Scribe_Values.Look(ref lastLoadoutId, "cessLoadouts_lastLoadoutId", -1);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 claimed ??= new List<ThingDefStuffDefPair>();

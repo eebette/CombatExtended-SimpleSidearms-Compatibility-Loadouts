@@ -25,11 +25,11 @@ SAVEDATA="$COMPAT/test/SaveData"
 RESULT="$SAVEDATA/test-results-$SCENARIO.json"
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-    dotnet build "$REPO/Source/CESidearmsSupply/CESidearmsSupply.csproj" -c Release
+    dotnet build "$REPO/Source/CESimpleSidearmsCompat.Loadouts/CESimpleSidearmsCompat.Loadouts.csproj" -c Release
     dotnet build "$REPO/test/StagingMod/Source/SupplyTestStaging.csproj" -c Release
 fi
 
-CFG="$SAVEDATA/Config/Mod_CESidearmsSupply_SupplyMod.xml"
+CFG="$SAVEDATA/Config/Mod_CESidearmsSupply_LoadoutsMod.xml"
 if [[ -f "$CFG" ]] && grep -qE "<loadoutWeaponsAsSidearms>False</|<releasePending>True</" "$CFG"; then
     echo "== MOD CONFIG POISONED before launch — a previous run left non-default settings ==" >&2
     grep -E "loadoutWeaponsAsSidearms|releasePending" "$CFG" >&2
@@ -50,7 +50,7 @@ fi
 # A test that flips persisted mod settings must not poison the next boot: a leaked
 # loadoutWeaponsAsSidearms=False turned every later launch into a feature-off world
 # (phase 0 burned its whole deadline; caught by a human watching pawns starve).
-CFG="$SAVEDATA/Config/Mod_CESidearmsSupply_SupplyMod.xml"
+CFG="$SAVEDATA/Config/Mod_CESidearmsSupply_LoadoutsMod.xml"
 if [[ -f "$CFG" ]] && grep -qE "<loadoutWeaponsAsSidearms>False</|<releasePending>True</" "$CFG"; then
     echo "== MOD CONFIG POISONED by this run — a test left non-default settings on disk ==" >&2
     grep -E "loadoutWeaponsAsSidearms|releasePending" "$CFG" >&2
