@@ -810,6 +810,8 @@ namespace CESupplyTestStaging
             bool orderedSwapSkippedExcluded = false;
             bool orderedSwapPickedRunnerUp = false;
             bool orderedSwapJobWasForced = false;
+            ThingDef orderedSwapFavourite = null;
+            string orderedSwapPickerSaw = "unsampled";
             bool loadoutSwitchClearedAll = false;
             bool loadoutSwitchStayedClear = false;
             bool standEquipWithdrew = false;
@@ -2601,33 +2603,24 @@ namespace CESupplyTestStaging
                 deadlineTicks = 6000,
                 arrange = () =>
                 {
-                    Baseline(dockie, loadout, sniper, pistol);
-                    // Under CE, SS's DPS picker scores an ammo-less gun as unusable. BOTH
-                    // guns need rounds: the runner-up to be pickable at all, and the
-                    // excluded sniper to be genuinely tempting — without its ammo the old
-                    // exemption bug picked the pistol too and the A/B could not tell the
-                    // trees apart.
-                    foreach (ThingDef gun in new[] { sniper, pistol })
+                    // MELEE, deliberately: the ranged picker is rewired by the sibling
+                    // compat patch's ammo-aware re-run (P03) and scored by CE's DPS table
+                    // — three phase designs in a row lost to that machinery. The melee
+                    // picker is upstream-pure: no ammo, no sibling patches, same
+                    // canUseSidearmInstance gate under test.
+                    Baseline(dockie, loadout, gladius, D("MeleeWeapon_Knife"));
+                    // SELF-CALIBRATING: ask the picker for its favourite and exclude
+                    // exactly that — whichever blade the scorer prefers is the only one
+                    // that tempts the old bug.
+                    GettersFilters.findBestMeleeWeapon(dockie, out ThingWithComps favNow,
+                        includeEquipped: true, includeRangedWithBash: false);
+                    orderedSwapFavourite = favNow?.def;
+                    if (orderedSwapFavourite != null)
                     {
-                        ThingDef rounds = gun.GetCompProperties<CombatExtended.CompProperties_AmmoUser>()
-                            ?.ammoSet?.ammoTypes?.FirstOrDefault()?.ammo;
-                        if (rounds != null
-                            && !dockie.inventory.innerContainer.Any(t => t.def == rounds))
-                        {
-                            Thing stack = ThingMaker.MakeThing(rounds);
-                            stack.stackCount = 60;
-                            dockie.inventory.innerContainer.TryAdd(stack);
-                        }
+                        PlayerForgets(dockie, orderedSwapFavourite);
                     }
-                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
-                    // The PISTOL is the picker's favourite at unspecified range (CE DPS:
-                    // short warmup beats the sniper's), so the exclusion must sit on IT —
-                    // excluding the sniper tempted nobody and the A leg passed without
-                    // the fix.
-                    PlayerForgets(dockie, pistol);
-                    // No ranged role, so SS's picker path (findBestRangedWeapon) is the
-                    // live one — the exact path that reads carried weapons raw.
-                    PlayerClearsRangedRole(dockie);
+                    // No melee role, so the picker path is the live one.
+                    InGizmo(() => Mem(dockie).UnsetMeleeWeaponPreference());
                 },
                 mutate = () =>
                 {
@@ -2638,26 +2631,32 @@ namespace CESupplyTestStaging
                     Verse.AI.Job order = JobMaker.MakeJob(JobDefOf.Goto, dest);
                     dockie.jobs.TryTakeOrderedJob(order);
                     orderedSwapJobWasForced = dockie.CurJob?.playerForced ?? false;
-                    // SS's idle re-arm entry point, driven directly with the ranged mode
-                    // forced (the pawn's own combat preference may be melee/by-skill, and
-                    // the branch under test is the ranged picker): with the exemption,
-                    // this equipped the excluded sniper; with selection-level
-                    // registration, the pistol wins.
+                    // SS's re-arm entry point, driven in melee mode: with the old
+                    // playerForced exemption this equipped the excluded blade; with
+                    // selection-level registration the other blade wins.
                     WeaponAssingment.equipBestWeaponFromInventoryByPreference(
                         dockie, PeteTimesSix.SimpleSidearms.Utilities.Enums.DroppingModeEnum.Calm,
-                        PeteTimesSix.SimpleSidearms.Utilities.Enums.PrimaryWeaponMode.Ranged);
-                    orderedSwapSkippedExcluded = dockie.equipment?.Primary?.def != pistol;
-                    orderedSwapPickedRunnerUp = dockie.equipment?.Primary?.def == sniper;
+                        PeteTimesSix.SimpleSidearms.Utilities.Enums.PrimaryWeaponMode.Melee);
+                    GettersFilters.findBestMeleeWeapon(dockie, out ThingWithComps sawNow,
+                        includeEquipped: true, includeRangedWithBash: false);
+                    orderedSwapPickerSaw = sawNow?.def?.defName ?? "null";
+                    ThingDef primaryNow = dockie.equipment?.Primary?.def;
+                    orderedSwapSkippedExcluded = primaryNow != orderedSwapFavourite;
+                    orderedSwapPickedRunnerUp = primaryNow != null && primaryNow.IsMeleeWeapon
+                        && primaryNow != orderedSwapFavourite;
                 },
                 checks =
                 {
                     P("the-pickers-favourite-is-excluded-and-carried", () =>
                     {
                         var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
-                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
-                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                            .Any(w => w.def == pistol);
-                        return (excluded && carried, $"excluded={excluded} carried={carried}");
+                        bool excluded = orderedSwapFavourite != null && rec != null
+                            && rec.dontEquip.Any(pr => pr.thing == orderedSwapFavourite);
+                        bool carried = orderedSwapFavourite != null
+                            && dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                                .Any(w => w.def == orderedSwapFavourite);
+                        return (excluded && carried,
+                                $"favourite={orderedSwapFavourite?.defName ?? "none"} excluded={excluded} carried={carried}");
                     }),
                     C("the-order-was-player-forced", () =>
                     {
@@ -2671,7 +2670,10 @@ namespace CESupplyTestStaging
                     {
                         // The refusal must not fall through to melee/unarmed — the second
                         // best RANGED weapon takes the slot.
-                        return (orderedSwapPickedRunnerUp, $"runner-up equipped={orderedSwapPickedRunnerUp}");
+                        return (orderedSwapPickedRunnerUp,
+                                $"runner-up equipped={orderedSwapPickedRunnerUp} "
+                                + $"picker-saw={orderedSwapPickerSaw} "
+                                + $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
                     }),
                 }
             });
