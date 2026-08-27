@@ -37,7 +37,9 @@ namespace CESidearmsSupply
 
         public override string SettingsCategory()
         {
-            return "Sidearms & Supply for CE";
+            // Matches how the mod is actually named where players see it — the old
+            // working title made the settings entry unfindable.
+            return "CE+SS Compatibility - Loadouts";
         }
 
         public override void DoSettingsWindowContents(Rect inRect)
@@ -111,7 +113,7 @@ namespace CESidearmsSupply
             {
                 Settings.releasePending = true;
                 Settings.Write();
-                Messages.Message("[Sidearms&Supply] No save loaded — claimed sidearms will be released "
+                Messages.Message("[CE+SS Loadouts] No save loaded — claimed sidearms will be released "
                                  + "when you next load one.", MessageTypeDefOf.CautionInput, historical: false);
                 return false;
             }
@@ -161,7 +163,7 @@ namespace CESidearmsSupply
                     : Settings.releasePending
                         ? $" {deferred} pawn(s) are away; they are released on a later save load."
                         : $" {deferred} pawn(s) are away and were skipped.";
-                Messages.Message($"[Sidearms&Supply] Released {released} claimed sidearm(s)." + away,
+                Messages.Message($"[CE+SS Loadouts] Released {released} claimed sidearm(s)." + away,
                                  MessageTypeDefOf.TaskCompletion, historical: false);
             }
             return true;
@@ -178,8 +180,44 @@ namespace CESidearmsSupply
     /// </summary>
     public class SupplySessionComponent : GameComponent
     {
+        /// <summary>Incremented by the reconcile prefix; consumed by the liveness canary.</summary>
+        public static int reconcilePasses;
+
+        private int lastLivenessTick;
+
         public SupplySessionComponent(Game game)
         {
+        }
+
+        public override void GameComponentTick()
+        {
+            // Liveness canary, ~10 in-game hours apart: the whole feature rides CE's
+            // job-giver cadence, and if a CE update reroutes loadout enforcement, every
+            // patch stays applied while nothing ever runs — the one break with no other
+            // signal. A managed colonist with zero reconcile passes across a window is
+            // that state.
+            int now = Find.TickManager.TicksGame;
+            if (now - lastLivenessTick < 25000)
+            {
+                return;
+            }
+            bool hadPasses = reconcilePasses > 0;
+            reconcilePasses = 0;
+            bool firstWindow = lastLivenessTick == 0;
+            lastLivenessTick = now;
+            if (firstWindow || hadPasses || SupplyMod.Settings == null
+                || !SupplyMod.Settings.loadoutWeaponsAsSidearms)
+            {
+                return;
+            }
+            if (PawnsFinder.AllMaps_FreeColonistsSpawned
+                    .Any(p => Patches.PlayerIntent.ManagedPawn(p)))
+            {
+                Log.ErrorOnce("[CE+SS Loadouts] The loadout reconcile has not run for 10+ in-game "
+                              + "hours despite a managed colonist — Combat Extended has probably "
+                              + "rerouted its loadout updates and the projection is inert. "
+                              + "Please report this.", 0x53535243);
+            }
         }
 
         public override void FinalizeInit()
@@ -198,17 +236,58 @@ namespace CESidearmsSupply
     {
         static Bootstrap()
         {
-            try
+            // Named absence beats misattributed spam: without SS, the CE-attributed
+            // classes would otherwise apply and then JIT-fail inside the think tree on
+            // every pass, with stacks pointing at Combat Extended.
+            bool ceActive = ModsConfig.IsActive("CETeam.CombatExtended");
+            bool ssActive = ModsConfig.IsActive("PeteTimesSix.SimpleSidearms");
+            if (!ceActive || !ssActive)
             {
-                new Harmony("eebette.CESidearmsSupply").PatchAll(typeof(Bootstrap).Assembly);
-                Log.Message("[Sidearms&Supply] Patches installed.");
+                Log.Error("[CE+SS Loadouts] Required mod missing:"
+                          + (ceActive ? "" : " Combat Extended")
+                          + (ssActive ? "" : " Simple Sidearms")
+                          + " — nothing is patched; the mod is inert this session.");
+                return;
             }
-            catch (System.Exception e)
+
+            // Per-class patching, deliberately not PatchAll: Harmony also binds patch
+            // PARAMETERS by name and __result by return type, and neither is visible to
+            // a Prepare() guard — an upstream parameter rename would abort PatchAll
+            // mid-assembly, leaving the mod half-patched (enforcement alive, its
+            // withdrawal recorders dead) under a message claiming it is fully off.
+            // Per-class, one binding failure costs that class alone, with its own named
+            // error — the same degrade contract every Prepare() already promises.
+            var harmony = new Harmony("eebette.CESidearmsSupply");
+            int failedClasses = 0;
+            foreach (System.Type type in typeof(Bootstrap).Assembly.GetTypes())
             {
-                // PatchAll aborts the whole assembly on the first target it cannot resolve.
-                // Every patch class has a Prepare() for that, so reaching here means
-                // something else — say so rather than dying as a TypeInitializationException.
-                Log.Error("[Sidearms&Supply] Patching failed; the mod will do nothing this session. " + e);
+                if (type.GetCustomAttributes(typeof(HarmonyPatch), inherit: true).Length == 0)
+                {
+                    continue;
+                }
+                try
+                {
+                    new PatchClassProcessor(harmony, type).Patch();
+                }
+                catch (System.Exception e)
+                {
+                    failedClasses++;
+                    Log.Error($"[CE+SS Loadouts] {type.Name} failed to patch and is disabled "
+                              + $"for this session: {e.Message}");
+                }
+            }
+            Log.Message(failedClasses == 0
+                ? "[CE+SS Loadouts] Patches installed."
+                : $"[CE+SS Loadouts] Patches installed with {failedClasses} class(es) disabled — see errors above.");
+
+            // Comp-attach canary: if the XML patch stops matching pawn defs, every patch
+            // quietly no-ops behind a null comp — the one failure mode with no other
+            // signal anywhere.
+            if (ThingDefOf.Human?.comps?.Any(c => c is CompProperties_LoadoutSidearms) != true)
+            {
+                Log.Error("[CE+SS Loadouts] CompLoadoutSidearms is not attached to Human — "
+                          + "Patches/pawnComp.xml no longer matches the pawn defs and the whole "
+                          + "feature is inert.");
             }
         }
     }

@@ -114,7 +114,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error($"[Sidearms&Supply] CompSidearmMemory.{method} not found — {consequence} "
+            Log.Error($"[CE+SS Loadouts] CompSidearmMemory.{method} not found — {consequence} "
                       + "Simple Sidearms probably moved it.");
             return false;
         }
@@ -135,7 +135,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] Gizmo_SidearmsList.handleInteraction not found — player "
+            Log.Error("[CE+SS Loadouts] Gizmo_SidearmsList.handleInteraction not found — player "
                       + "decisions in the sidearm gizmo will not be recorded. Simple Sidearms "
                       + "probably moved it.");
             return false;
@@ -350,13 +350,27 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] EquipmentUtility.CanEquip not found — excluded weapons "
-                      + "can be drawn by the game and will re-enter the sidearm rotation.");
+            Log.Error("[CE+SS Loadouts] EquipmentUtility.CanEquip not found — Combat Extended's "
+                      + "inventory-side weapon picks will stop refusing excluded weapons "
+                      + "(the sidearm list itself stays clean). RimWorld probably moved it.");
             return false;
         }
 
         [HarmonyPostfix]
         public static void Postfix(Thing thing, Pawn pawn, ref string cantReason, ref bool __result)
+        {
+            try
+            {
+                PostfixInner(thing, pawn, ref cantReason, ref __result);
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce("[CE+SS Loadouts] CanEquip veto failed: " + e,
+                              0x53535245 ^ (thing?.thingIDNumber ?? 0));
+            }
+        }
+
+        private static void PostfixInner(Thing thing, Pawn pawn, ref string cantReason, ref bool __result)
         {
             if (!__result || PlayerIntent.PlayerChoosing || thing?.def == null || pawn == null)
             {
@@ -433,7 +447,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] WITab_Caravan_Gear.TryEquipDraggedItem not found — "
+            Log.Error("[CE+SS Loadouts] WITab_Caravan_Gear.TryEquipDraggedItem not found — "
                       + "equipping an excluded weapon from the caravan gear tab will be refused. "
                       + "RimWorld probably moved it.");
             return false;
@@ -456,9 +470,9 @@ namespace CESidearmsSupply.Patches
     /// of which funnel through equipSpecificWeapon. This prefix registers the exclusion
     /// with that funnel the same way SS already honours bladelink's.
     ///
-    /// Player paths stay open: a gizmo click runs inside the gizmo scope (PlayerIsDriving),
-    /// and a player-ordered job carries playerForced. A forced weapon outranks the
-    /// exclusion, matching the reconcile.
+    /// A forced weapon outranks the exclusion, matching the reconcile. Player paths
+    /// need no exemption: every gizmo gesture that equips an excluded pair withdraws the
+    /// exclusion in the same click before the equip call reaches here.
     /// </summary>
     [HarmonyPatch(typeof(WeaponAssingment), nameof(WeaponAssingment.equipSpecificWeapon),
                   new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) })]
@@ -471,7 +485,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] WeaponAssingment.equipSpecificWeapon not found — Simple "
+            Log.Error("[CE+SS Loadouts] WeaponAssingment.equipSpecificWeapon not found — Simple "
                       + "Sidearms can still arm a pawn with an excluded weapon on its own. "
                       + "Simple Sidearms probably moved it.");
             return false;
@@ -480,21 +494,34 @@ namespace CESidearmsSupply.Patches
         [HarmonyPrefix]
         public static bool Prefix(Pawn pawn, ThingWithComps weapon, ref bool __result)
         {
+            try
+            {
+                return PrefixInner(pawn, weapon, ref __result);
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce("[CE+SS Loadouts] equip funnel guard failed: " + e,
+                              0x53535246 ^ (pawn?.thingIDNumber ?? 0));
+                return true;
+            }
+        }
+
+        private static bool PrefixInner(Pawn pawn, ThingWithComps weapon, ref bool __result)
+        {
             // weapon == null is SS unequipping to unarmed; never blocked.
             if (weapon?.def == null || pawn == null || !PlayerIntent.ManagedPawn(pawn))
             {
                 return true;
             }
-            // No player equip gesture ever reaches this funnel (the gizmo runs inside
-            // the scope; tab, caravan and map equips go through vanilla/CE paths), so
-            // there is nothing here to exempt for the player. An earlier CurJob.playerForced
-            // exemption assumed otherwise — and since vanilla stamps that flag on EVERY
-            // right-click order, attacks included, its only effect was to switch this ban
-            // off during player-directed combat.
-            if (PlayerIntent.PlayerIsDriving)
-            {
-                return true;
-            }
+            // No exemption for player context here, deliberately — twice over. A
+            // CurJob.playerForced exemption switched the ban off during player-directed
+            // combat (vanilla stamps that flag on every right-click order). And a
+            // PlayerIsDriving exemption protected no reachable player path — every gizmo
+            // equip of an excluded pair withdraws the exclusion in the same click before
+            // any equip call, so the Contains check below already passes — while a
+            // think-tree restart nested INSIDE a gizmo click (SS ends a Hunt job with a
+            // synchronous restart; the re-issued job's first toil can fire the autotool)
+            // is pure machine work that the exemption wrongly waved through.
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
             rec?.SyncAssignment(pawn);
             if (rec == null || rec.dontEquip.Count == 0)
@@ -535,7 +562,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] ITab_Inventory.DrawThingRowCE not found — the inventory "
+            Log.Error("[CE+SS Loadouts] ITab_Inventory.DrawThingRowCE not found — the inventory "
                       + "tab will show an excluded weapon's Equip entry as refused instead of "
                       + "offering it. Combat Extended probably moved it.");
             return false;
@@ -589,7 +616,7 @@ namespace CESidearmsSupply.Patches
         internal static void Filter(Pawn pawn, List<ThingWithComps> list)
         {
             if (list == null || pawn == null || hidingExcludedFor != pawn
-                || PlayerIntent.PlayerIsDriving || !PlayerIntent.ManagedPawn(pawn))
+                || !PlayerIntent.ManagedPawn(pawn))
             {
                 return;
             }
@@ -633,9 +660,10 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] GettersFilters.findBestRangedWeapon not found — Simple "
-                      + "Sidearms' ranged picker can nominate an excluded weapon. "
-                      + "Simple Sidearms probably moved it.");
+            Log.Error("[CE+SS Loadouts] GettersFilters.findBestRangedWeapon not found — Simple "
+                      + "Sidearms' ranged picker can nominate an excluded weapon, and the late "
+                      + "refusal makes its preference tree fall through to melee/unarmed instead "
+                      + "of the runner-up gun. Simple Sidearms probably moved it.");
             return false;
         }
 
@@ -658,8 +686,9 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] GettersFilters.findBestMeleeWeapon not found — Simple "
-                      + "Sidearms' melee picker can nominate an excluded weapon. "
+            Log.Error("[CE+SS Loadouts] GettersFilters.findBestMeleeWeapon not found — Simple "
+                      + "Sidearms' melee picker can nominate an excluded weapon, and the late "
+                      + "refusal leaves the pawn unarmed instead of taking the runner-up blade. "
                       + "Simple Sidearms probably moved it.");
             return false;
         }
@@ -685,7 +714,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] WeaponAssingment.equipBestWeaponFromInventoryByStatModifiers "
+            Log.Error("[CE+SS Loadouts] WeaponAssingment.equipBestWeaponFromInventoryByStatModifiers "
                       + "not found — excluding a tool can suspend tool auto-switching. "
                       + "Simple Sidearms probably moved it.");
             return false;
@@ -709,7 +738,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] Extensions.GetCarriedWeapons not found — the exclusion "
+            Log.Error("[CE+SS Loadouts] Extensions.GetCarriedWeapons not found — the exclusion "
                       + "cannot be hidden from Simple Sidearms' pickers. "
                       + "Simple Sidearms probably moved it.");
             return false;
@@ -717,7 +746,17 @@ namespace CESidearmsSupply.Patches
 
         [HarmonyPostfix]
         public static void Postfix(Pawn pawn, List<ThingWithComps> __result)
-            => SelectionFilter.Filter(pawn, __result);
+        {
+            try
+            {
+                SelectionFilter.Filter(pawn, __result);
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce("[CE+SS Loadouts] selection filter failed: " + e,
+                              0x53535247 ^ (pawn?.thingIDNumber ?? 0));
+            }
+        }
     }
 
     /// <summary>
@@ -744,7 +783,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] ITab_Inventory.SyncedTrySwitchToWeapon not found — "
+            Log.Error("[CE+SS Loadouts] ITab_Inventory.SyncedTrySwitchToWeapon not found — "
                       + "equipping an excluded weapon from the inventory tab will not clear "
                       + "its exclusion. Combat Extended probably moved it.");
             return false;
@@ -782,7 +821,7 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            Log.Error("[Sidearms&Supply] Pawn_EquipmentTracker.AddEquipment not found — "
+            Log.Error("[CE+SS Loadouts] Pawn_EquipmentTracker.AddEquipment not found — "
                       + "equipping an excluded weapon by hand will not clear its exclusion. "
                       + "RimWorld probably moved it.");
             return false;
@@ -799,7 +838,7 @@ namespace CESidearmsSupply.Patches
             {
                 // AddEquipment runs inside think-tree job drivers; a throw here breaks
                 // the pawn's whole decision loop, not just this feature.
-                Log.ErrorOnce($"[Sidearms&Supply] equip recorder failed: {e}",
+                Log.ErrorOnce($"[CE+SS Loadouts] equip recorder failed: {e}",
                               0x53535233 ^ (newEq?.thingIDNumber ?? 0));
             }
         }

@@ -19,7 +19,7 @@ phase that was never reached is not marked failed — so a run that stopped earl
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, currently in 40 phases (one DLC-gated — the outfit-stand phase self-skips without its JobDef): initial reconcile and physical fetch (memory contents,
+`supply1` covers, currently in 43 phases (one DLC-gated — the outfit-stand phase self-skips without its JobDef): initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -170,6 +170,11 @@ not a test.
   the melee flavour; both ride the same canUseSidearmInstance gate). Safe by
   construction — the re-run calls the same filtered picker — but the interaction
   belongs to the compat repo's suite when that repo is next active.
+- The TakeFromOther downgrade is driven at the postfix contract (the exact job shape
+  CE builds); the end-to-end driver run is not — CE only takes from pack animals and
+  hosted prisoners, and the issued job did not complete against a wandering animal in
+  the window during development. GetPrioritySlot's carrier nomination (LowStock,
+  carriedBy set) was verified live.
 - The outfit-stand equip path is driven at the recorder's contract level (a
   playerForced UseOutfitStand job around a real AddEquipment), not through a real
   stand + driver; equipping an excluded weapon from an actual stand is a manual test — NOT YET RUN anywhere (the dev environment lacks the DLC, so the phase and the recorder clause both ship with zero executions).
@@ -195,4 +200,4 @@ not a test.
   element; RimWorld discards it and continues, and the save is clean after re-saving).
   Sidearm memories the mod wrote remain as ordinary SS data; "Release all claimed
   sidearms" before uninstalling clears them.
-- Dev log: no red errors from [Sidearms&Supply]; any [Sidearms&Supply] Log.ErrorOnce is a failure.
+- Dev log: no red errors from [CE+SS Loadouts]; any [CE+SS Loadouts] Log.ErrorOnce is a failure.

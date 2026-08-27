@@ -865,6 +865,11 @@ namespace CESupplyTestStaging
             bool releaseTookTheRest = false;
             bool gestureAfterAssignSurvived = false;
             bool reusedIdKeptRules = true;
+            bool inScopeSkippedExcluded = false;
+            bool inScopeRunnerUpWon = false;
+            ThingDef inScopeFavourite = null;
+            bool takeFlagCleared = false;
+            bool takeFlagKept = false;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -3198,6 +3203,153 @@ namespace CESupplyTestStaging
                     {
                         bool wielded = dockie.equipment?.Primary?.def == sniper;
                         return (wielded, $"primary={dockie.equipment?.Primary?.def?.defName ?? "none"}");
+                    }),
+                }
+            });
+
+            // The suite drove TakeFromOther zero times (fragility audit). Driven at the
+            // POSTFIX's contract: the exact job shape CE builds (TakeFromOther with the
+            // equip flag in target C — GetPrioritySlot's carrier nomination was verified
+            // live during development: a pack muffalo's stock is found, LowStock,
+            // carriedBy set) must lose the flag for an excluded target and keep it
+            // otherwise. The end-to-end driver run is a known gap (TESTPLAN).
+            phases.Add(new Phase
+            {
+                label = "an-excluded-take-from-a-carrier-loses-its-equip-flag",
+                deadlineTicks = 4000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, pistol);
+                    PlayerForgets(dockie, sniper);
+                },
+                mutate = () =>
+                {
+                    Thing ground = GenSpawn.Spawn(ThingMaker.MakeThing(sniper),
+                        CellFinder.RandomClosewalkCellNear(dockie.Position, dockie.Map, 4), dockie.Map);
+                    try
+                    {
+                        Verse.AI.Job j = JobMaker.MakeJob(CombatExtended.CE_JobDefOf.TakeFromOther,
+                            ground, dockie, dockie);   // A=thing, B=carrier, C=equip flag
+                        CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch
+                            .Postfix(dockie, ref j);
+                        takeFlagCleared = j != null
+                            && j.def == CombatExtended.CE_JobDefOf.TakeFromOther
+                            && !j.GetTarget(Verse.AI.TargetIndex.C).HasThing;
+                    }
+                    finally
+                    {
+                        if (!ground.Destroyed)
+                        {
+                            ground.Destroy();
+                        }
+                    }
+                },
+                checks =
+                {
+                    P("the-sniper-is-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == sniper);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    C("the-equip-flag-is-cleared-and-the-take-survives", () =>
+                    {
+                        return (takeFlagCleared, $"flag cleared, job intact={takeFlagCleared}");
+                    }),
+                }
+            });
+
+            // The positive control: an un-excluded target keeps its equip flag.
+            phases.Add(new Phase
+            {
+                label = "a-non-excluded-take-from-a-carrier-still-equips",
+                deadlineTicks = 4000,
+                arrange = () => Baseline(dockie, loadout, sniper, pistol),
+                mutate = () =>
+                {
+                    Thing ground = GenSpawn.Spawn(ThingMaker.MakeThing(sniper),
+                        CellFinder.RandomClosewalkCellNear(dockie.Position, dockie.Map, 4), dockie.Map);
+                    try
+                    {
+                        Verse.AI.Job j = JobMaker.MakeJob(CombatExtended.CE_JobDefOf.TakeFromOther,
+                            ground, dockie, dockie);
+                        CESidearmsSupply.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch
+                            .Postfix(dockie, ref j);
+                        takeFlagKept = j != null
+                            && j.def == CombatExtended.CE_JobDefOf.TakeFromOther
+                            && j.GetTarget(Verse.AI.TargetIndex.C).HasThing;
+                    }
+                    finally
+                    {
+                        if (!ground.Destroyed)
+                        {
+                            ground.Destroy();
+                        }
+                    }
+                },
+                checks =
+                {
+                    C("the-equip-flag-survives-for-a-non-excluded-target", () =>
+                    {
+                        return (takeFlagKept, $"flag kept={takeFlagKept}");
+                    }),
+                }
+            });
+
+            // The nested-machine-work fix: a think-tree restart can run INSIDE an open
+            // gizmo click, so the selection ban must hold with the scope up — the old
+            // PlayerIsDriving stand-down waved that machine work through, and protected
+            // no reachable player path (every gizmo equip withdraws first).
+            phases.Add(new Phase
+            {
+                label = "the-ban-holds-inside-a-gizmo-click",
+                deadlineTicks = 6000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, gladius, D("MeleeWeapon_Knife"));
+                    GettersFilters.findBestMeleeWeapon(dockie, out ThingWithComps favNow,
+                        includeEquipped: true, includeRangedWithBash: false);
+                    inScopeFavourite = favNow?.def;
+                    if (inScopeFavourite != null)
+                    {
+                        PlayerForgets(dockie, inScopeFavourite);
+                    }
+                    InGizmo(() => Mem(dockie).UnsetMeleeWeaponPreference());
+                },
+                mutate = () =>
+                {
+                    ThingWithComps held = dockie.equipment?.Primary;
+                    if (held != null)
+                    {
+                        dockie.equipment.TryTransferEquipmentToContainer(held, dockie.inventory.innerContainer);
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    // The machine picker firing INSIDE the click scope — the nested
+                    // think-restart shape, driven directly.
+                    InGizmo(() => WeaponAssingment.equipBestWeaponFromInventoryByPreference(
+                        dockie, PeteTimesSix.SimpleSidearms.Utilities.Enums.DroppingModeEnum.Calm,
+                        PeteTimesSix.SimpleSidearms.Utilities.Enums.PrimaryWeaponMode.Melee));
+                    ThingDef primaryNow = dockie.equipment?.Primary?.def;
+                    inScopeSkippedExcluded = primaryNow != inScopeFavourite;
+                    inScopeRunnerUpWon = primaryNow != null && primaryNow.IsMeleeWeapon
+                        && primaryNow != inScopeFavourite;
+                },
+                checks =
+                {
+                    P("the-favourite-blade-is-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = inScopeFavourite != null && rec != null
+                            && rec.dontEquip.Any(pr => pr.thing == inScopeFavourite);
+                        return (excluded, $"favourite={inScopeFavourite?.defName ?? "none"} excluded={excluded}");
+                    }),
+                    C("the-excluded-blade-was-skipped-inside-the-scope", () =>
+                    {
+                        return (inScopeSkippedExcluded, $"skipped={inScopeSkippedExcluded}");
+                    }),
+                    C("the-runner-up-blade-won-inside-the-scope", () =>
+                    {
+                        return (inScopeRunnerUpWon, $"runner-up won={inScopeRunnerUpWon}");
                     }),
                 }
             });
