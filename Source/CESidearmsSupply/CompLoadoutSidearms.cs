@@ -48,6 +48,14 @@ namespace CESidearmsSupply
         /// projection would restore a cleared default ranged weapon on the next pass.
         /// </summary>
         public bool rangedRoleVetoed;
+
+        /// <summary>
+        /// The loadout assignment the player intent above belongs to (-1 = the default
+        /// loadout). Exclusions and role vetoes are deliberately EPHEMERAL: assigning a
+        /// different loadout clears them all, because there is no UI to review them and
+        /// a rule recorded under one loadout has no defined meaning under another.
+        /// </summary>
+        public int lastLoadoutId = -1;
         public bool meleeRoleVetoed;
 
         public Pawn Pawn => parent as Pawn;
@@ -81,6 +89,7 @@ namespace CESidearmsSupply
             Scribe_Collections.Look(ref dontEquip, "ceSupply_dontEquip", LookMode.Deep);
             Scribe_Values.Look(ref rangedRoleVetoed, "ceSupply_rangedRoleVetoed", false);
             Scribe_Values.Look(ref meleeRoleVetoed, "ceSupply_meleeRoleVetoed", false);
+            Scribe_Values.Look(ref lastLoadoutId, "ceSupply_lastLoadoutId", -1);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 claimed ??= new List<ThingDefStuffDefPair>();

@@ -807,6 +807,12 @@ namespace CESupplyTestStaging
             bool failedSwitchNotRemembered = false;
             bool releaseLeftNoClaims = false;
             bool claimsReturnedAfterRestore = false;
+            bool orderedSwapSkippedExcluded = false;
+            bool orderedSwapPickedRunnerUp = false;
+            bool orderedSwapJobWasForced = false;
+            bool loadoutSwitchClearedAll = false;
+            bool loadoutSwitchStayedClear = false;
+            bool standEquipWithdrew = false;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -2581,6 +2587,219 @@ namespace CESupplyTestStaging
                     }),
                 }
             });
+
+            // Round-5 High: the SS-funnel ban had a CurJob.playerForced exemption — and
+            // vanilla stamps that flag on EVERY right-click order, attacks included, while
+            // no player equip gesture ever reaches the funnel at all. So the ban switched
+            // itself off during player-directed combat. Paired fix: the exclusion is now
+            // registered at SELECTION (canUseSidearmInstance, where SS registers
+            // bladelink), so the pickers skip the excluded weapon and the runner-up wins
+            // instead of the refusal falling through to melee/unarmed.
+            phases.Add(new Phase
+            {
+                label = "an-ordered-job-does-not-unpocket-an-excluded-weapon",
+                deadlineTicks = 6000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, pistol);
+                    // Under CE, SS's DPS picker scores an ammo-less gun as unusable — the
+                    // runner-up needs rounds to be pickable at all.
+                    ThingDef pistolAmmo = pistol.GetCompProperties<CombatExtended.CompProperties_AmmoUser>()
+                        ?.ammoSet?.ammoTypes?.FirstOrDefault()?.ammo;
+                    if (pistolAmmo != null
+                        && !dockie.inventory.innerContainer.Any(t => t.def == pistolAmmo))
+                    {
+                        Thing rounds = ThingMaker.MakeThing(pistolAmmo);
+                        rounds.stackCount = 60;
+                        dockie.inventory.innerContainer.TryAdd(rounds);
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    PlayerForgets(dockie, sniper);
+                    // No ranged role, so SS's picker path (findBestRangedWeapon) is the
+                    // live one — the exact path that reads carried weapons raw.
+                    PlayerClearsRangedRole(dockie);
+                },
+                mutate = () =>
+                {
+                    // The shape of every player order: TryTakeOrderedJob stamps playerForced.
+                    // A REAL destination — ordering the pawn to its own tile ends the job
+                    // in the same tick and no forced job is standing for the swap.
+                    IntVec3 dest = CellFinder.RandomClosewalkCellNear(dockie.Position, dockie.Map, 4);
+                    Verse.AI.Job order = JobMaker.MakeJob(JobDefOf.Goto, dest);
+                    dockie.jobs.TryTakeOrderedJob(order);
+                    orderedSwapJobWasForced = dockie.CurJob?.playerForced ?? false;
+                    // SS's idle re-arm entry point, driven directly with the ranged mode
+                    // forced (the pawn's own combat preference may be melee/by-skill, and
+                    // the branch under test is the ranged picker): with the exemption,
+                    // this equipped the excluded sniper; with selection-level
+                    // registration, the pistol wins.
+                    WeaponAssingment.equipBestWeaponFromInventoryByPreference(
+                        dockie, PeteTimesSix.SimpleSidearms.Utilities.Enums.DroppingModeEnum.Calm,
+                        PeteTimesSix.SimpleSidearms.Utilities.Enums.PrimaryWeaponMode.Ranged);
+                    orderedSwapSkippedExcluded = dockie.equipment?.Primary?.def != sniper;
+                    orderedSwapPickedRunnerUp = dockie.equipment?.Primary?.def == pistol;
+                },
+                checks =
+                {
+                    P("sniper-is-excluded-and-carried", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == sniper);
+                        bool carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                            .Any(w => w.def == sniper);
+                        return (excluded && carried, $"excluded={excluded} carried={carried}");
+                    }),
+                    C("the-order-was-player-forced", () =>
+                    {
+                        return (orderedSwapJobWasForced, $"playerForced={orderedSwapJobWasForced}");
+                    }),
+                    C("the-excluded-weapon-was-not-wielded", () =>
+                    {
+                        return (orderedSwapSkippedExcluded, $"skipped={orderedSwapSkippedExcluded}");
+                    }),
+                    C("the-runner-up-gun-won", () =>
+                    {
+                        // The refusal must not fall through to melee/unarmed — the second
+                        // best RANGED weapon takes the slot.
+                        return (orderedSwapPickedRunnerUp, $"runner-up equipped={orderedSwapPickedRunnerUp}");
+                    }),
+                }
+            });
+
+            // Round-5 ruling: exclusions and role vetoes belong to the loadout
+            // ASSIGNMENT. Any change of assignment clears them all — they are fabricated
+            // per-pawn rules with no review UI, ephemeral by design, and they do NOT come
+            // back when the old loadout does.
+            phases.Add(new Phase
+            {
+                label = "switching-loadouts-clears-exclusions-and-vetoes",
+                deadlineTicks = 6000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                    PlayerClearsRangedRole(dockie);
+                },
+                mutate = () =>
+                {
+                    var other = new Loadout("supply-test-other");
+                    LoadoutManager.AddLoadout(other);
+                    try
+                    {
+                        dockie.SetLoadout(other);
+                        ForceReconcile(dockie);
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        loadoutSwitchClearedAll = rec != null && rec.dontEquip.Count == 0
+                            && !rec.rangedRoleVetoed && !rec.meleeRoleVetoed;
+                        dockie.SetLoadout(loadout);
+                        ForceReconcile(dockie);
+                        loadoutSwitchStayedClear = rec != null && rec.dontEquip.Count == 0;
+                    }
+                    finally
+                    {
+                        LoadoutManager.RemoveLoadout(other);
+                        dockie.SetLoadout(loadout);
+                        ForceReconcile(dockie);
+                    }
+                },
+                checks =
+                {
+                    P("an-exclusion-and-a-veto-exist", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excl = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        bool veto = rec != null && rec.rangedRoleVetoed;
+                        return (excl && veto, $"excluded={excl} vetoed={veto}");
+                    }),
+                    C("the-assignment-change-cleared-everything", () =>
+                    {
+                        return (loadoutSwitchClearedAll, $"cleared={loadoutSwitchClearedAll}");
+                    }),
+                    C("returning-does-not-revive-them", () =>
+                    {
+                        return (loadoutSwitchStayedClear, $"still clear={loadoutSwitchStayedClear}");
+                    }),
+                    C("the-pistol-is-claimed-again", () =>
+                    {
+                        // The positive control: with the exclusion gone, the row claims it.
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == pistol);
+                        return (claimed, $"claimed={claimed}");
+                    }),
+                }
+            });
+
+            // Outfit stands: the click only queues a job — the equip happens minutes
+            // later inside JobDriver_UseOutfitStand, outside every scope, and SS's
+            // remember-on-equip hook does not cover that driver either. The recorder
+            // accepts that one job def's playerForced flag as player context (the think
+            // tree never issues it). Driven at the recorder's contract level: the real
+            // stand flow is a manual test (TESTPLAN).
+            if (JobDefOf.UseOutfitStand != null)
+            {
+            phases.Add(new Phase
+            {
+                label = "equipping-from-an-outfit-stand-withdraws-the-exclusion",
+                deadlineTicks = 4000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    PlayerForgets(dockie, pistol);
+                },
+                mutate = () =>
+                {
+                    var jobField = AccessTools.Field(typeof(Verse.AI.Pawn_JobTracker), "curJob");
+                    Verse.AI.Job old = dockie.CurJob;
+                    ThingWithComps pist = dockie.inventory.innerContainer.OfType<ThingWithComps>()
+                        .FirstOrDefault(t => t.def == pistol);
+                    ThingWithComps oldPrimary = dockie.equipment?.Primary;
+                    if (pist == null || jobField == null)
+                    {
+                        return;
+                    }
+                    Verse.AI.Job standJob = JobMaker.MakeJob(JobDefOf.UseOutfitStand);
+                    standJob.playerForced = true;
+                    jobField.SetValue(dockie.jobs, standJob);
+                    try
+                    {
+                        if (oldPrimary != null)
+                        {
+                            dockie.equipment.TryTransferEquipmentToContainer(oldPrimary,
+                                dockie.inventory.innerContainer);
+                        }
+                        dockie.inventory.innerContainer.Remove(pist);
+                        dockie.equipment.AddEquipment(pist);
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        standEquipWithdrew = rec != null && !rec.dontEquip.Any(pr => pr.thing == pistol);
+                    }
+                    finally
+                    {
+                        jobField.SetValue(dockie.jobs, old);
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    P("pistol-starts-excluded", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool excluded = rec != null && rec.dontEquip.Any(pr => pr.thing == pistol);
+                        return (excluded, $"excluded={excluded}");
+                    }),
+                    C("the-stand-equip-withdrew-the-exclusion", () =>
+                    {
+                        return (standEquipWithdrew, $"withdrawn={standEquipWithdrew}");
+                    }),
+                }
+            });
+            }
+            else
+            {
+                // Outfit stands are DLC content; without the def the recorder clause is
+                // inert by construction and there is nothing to drive.
+                Log.Message("[SupplyTest] UseOutfitStand def absent — stand phase skipped.");
+            }
 
             // Standing invariant, appended to every phase: nothing is ever both excluded
             // and remembered. A pair on both lists means a machine path wrote SS memory

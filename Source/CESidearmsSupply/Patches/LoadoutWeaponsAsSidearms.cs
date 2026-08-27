@@ -174,6 +174,21 @@ namespace CESidearmsSupply.Patches
             // inventory forever. The player's own memories, exclusions and role vetoes are
             // not claims and survive untouched.
             Loadout loadout = pawn.GetLoadout();
+
+            // Exclusions and role vetoes belong to the loadout ASSIGNMENT. Any change —
+            // a different loadout, the default one, a deleted one (CE reassigns its pawns
+            // to the default) — clears them all. They are fabricated per-pawn rules with
+            // no UI to review them; a rule recorded under one loadout has no defined
+            // meaning under another, so they are ephemeral by design rather than dormant.
+            int loadoutId = (loadout == null || loadout.defaultLoadout) ? -1 : loadout.UniqueID;
+            if (rec.lastLoadoutId != loadoutId)
+            {
+                rec.dontEquip.Clear();
+                rec.rangedRoleVetoed = false;
+                rec.meleeRoleVetoed = false;
+                rec.lastLoadoutId = loadoutId;
+            }
+
             if (loadout == null || loadout.defaultLoadout)
             {
                 if (rec.claimed.Count > 0)
@@ -197,13 +212,10 @@ namespace CESidearmsSupply.Patches
             ThingDefStuffDefPair? forced = memory.ForcedWeapon;
             ThingDefStuffDefPair? forcedDrafted = memory.ForcedWeaponWhileDrafted;
 
-            // An exclusion follows its row. Take the weapon out of the loadout and put it
-            // back and the pawn manages it again, rather than it staying silently excluded
-            // forever with nothing in any UI to say why.
-            //
-            // Note this is not reached on the default loadout — the early return above treats
-            // that as no opinion, so deleting a loadout does not quietly discard the player's
-            // exclusions along with everything else.
+            // Within one assignment, an exclusion follows its row: take the weapon out of
+            // the loadout and put it back and the pawn manages it again, rather than it
+            // staying silently excluded with nothing in any UI to say why. (Across
+            // assignments the clear above already handled everything.)
             rec.dontEquip.RemoveAll(p => p.thing == null || !declared.Contains(p.thing));
 
             HashSet<ThingDefStuffDefPair> target = Target(pawn, rec, declared);

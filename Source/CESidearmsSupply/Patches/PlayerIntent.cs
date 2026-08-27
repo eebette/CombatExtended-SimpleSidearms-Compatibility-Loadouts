@@ -477,7 +477,13 @@ namespace CESidearmsSupply.Patches
             {
                 return true;
             }
-            if (PlayerIntent.PlayerIsDriving || (pawn.CurJob?.playerForced ?? false))
+            // No player equip gesture ever reaches this funnel (the gizmo runs inside
+            // the scope; tab, caravan and map equips go through vanilla/CE paths), so
+            // there is nothing here to exempt for the player. An earlier CurJob.playerForced
+            // exemption assumed otherwise — and since vanilla stamps that flag on EVERY
+            // right-click order, attacks included, its only effect was to switch this ban
+            // off during player-directed combat.
+            if (PlayerIntent.PlayerIsDriving)
             {
                 return true;
             }
@@ -531,6 +537,62 @@ namespace CESidearmsSupply.Patches
 
         [HarmonyFinalizer]
         public static void Finalizer() => PlayerIntent.ExitChoice();
+    }
+
+    /// <summary>
+    /// The exclusion, registered where Simple Sidearms registers its own bans: at
+    /// SELECTION. SS honours bladelink/biocode inside canUseSidearmInstance, which every
+    /// picker filters through — so a ban living only at the equip step let the pickers
+    /// NOMINATE the excluded weapon, and the late refusal made SS's ranged branch fall
+    /// through to melee/unarmed instead of trying the runner-up gun, and made the warmup
+    /// swap report a swap that never happened. Registered here, every picker skips the
+    /// weapon up front and the runner-up wins; SS's own equip-time re-check
+    /// (WeaponAssingment.equipSpecificWeapon) then enforces it a second time for free,
+    /// and the gizmo renders the weapon with SS's own blocked cross and this reason.
+    ///
+    /// Two gates keep the player's surfaces open: PlayerIsDriving (gizmo clicks — the
+    /// blocked cross does not disable the click region, and the interaction runs inside
+    /// the scope where this stands down), and Spawned (the map float menu's "equip as
+    /// sidearm" option is built from a SPAWNED map item outside any scope; carried
+    /// weapons are unspawned, so every carried-side surface is covered and the map undo
+    /// gesture is not).
+    /// </summary>
+    [HarmonyPatch(typeof(StatCalculator), nameof(StatCalculator.canUseSidearmInstance),
+                  new[] { typeof(ThingWithComps), typeof(Pawn), typeof(string) },
+                  new[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Out })]
+    public static class StatCalculator_canUseSidearmInstance_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(StatCalculator), nameof(StatCalculator.canUseSidearmInstance),
+                    new[] { typeof(ThingWithComps), typeof(Pawn), typeof(string).MakeByRefType() }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] StatCalculator.canUseSidearmInstance not found — Simple "
+                      + "Sidearms' pickers can still nominate an excluded weapon. "
+                      + "Simple Sidearms probably moved it.");
+            return false;
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(ThingWithComps sidearmThing, Pawn pawn,
+                                   ref string errString, ref bool __result)
+        {
+            if (!__result || PlayerIntent.PlayerIsDriving || sidearmThing?.def == null
+                || sidearmThing.Spawned || pawn == null || !PlayerIntent.ManagedPawn(pawn))
+            {
+                return;
+            }
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            if (rec == null || rec.dontEquip.Count == 0
+                || !rec.dontEquip.Contains(sidearmThing.toThingDefStuffDefPair()))
+            {
+                return;
+            }
+            __result = false;
+            errString = "excluded from " + pawn.LabelShort + "'s sidearm rotation";
+        }
     }
 
     /// <summary>
@@ -604,8 +666,43 @@ namespace CESidearmsSupply.Patches
         [HarmonyPostfix]
         public static void Postfix(Pawn_EquipmentTracker __instance, ThingWithComps newEq)
         {
-            if (!PlayerIntent.PlayerChoosing || newEq?.def == null
-                || !(__instance?.pawn is Pawn pawn) || !PlayerIntent.ManagedPawn(pawn))
+            try
+            {
+                PostfixInner(__instance, newEq);
+            }
+            catch (Exception e)
+            {
+                // AddEquipment runs inside think-tree job drivers; a throw here breaks
+                // the pawn's whole decision loop, not just this feature.
+                Log.ErrorOnce($"[Sidearms&Supply] equip recorder failed: {e}",
+                              0x53535233 ^ (newEq?.thingIDNumber ?? 0));
+            }
+        }
+
+        private static void PostfixInner(Pawn_EquipmentTracker __instance, ThingWithComps newEq)
+        {
+            if (newEq?.def == null || !(__instance?.pawn is Pawn pawn))
+            {
+                return;
+            }
+            // Player context, three proofs. The scope covers the tab and caravan click
+            // chains. An equip landing on an UNSPAWNED caravan pawn is the player's even
+            // without it: the caravan gear tab is the only writer of equipment there (its
+            // persona-weapon path equips from a confirmation dialog one frame after the
+            // bracket closed — no job giver, SS switch or loadout pass runs off-map). And
+            // UseOutfitStand jobs exist only as player orders — the think tree never
+            // issues one — so for THAT def alone playerForced is genuinely the player's
+            // hand (contrast the deleted blanket playerForced exemption in the SS funnel
+            // prefix, which trusted the flag on attack orders too).
+            Verse.AI.Job curJob = pawn.CurJob;
+            bool playerContext = PlayerIntent.PlayerChoosing
+                || (!pawn.Spawned && RimWorld.Planet.CaravanUtility.GetCaravan(pawn) != null)
+                // The def is DLC content and its DefOf field is null without it — and
+                // null == null?.def is TRUE for an idle pawn, so the def must be checked
+                // first or this dereferences a null CurJob inside every think-tree equip.
+                || (JobDefOf.UseOutfitStand != null && curJob != null
+                    && curJob.def == JobDefOf.UseOutfitStand && curJob.playerForced);
+            if (!playerContext || !PlayerIntent.ManagedPawn(pawn))
             {
                 return;
             }
@@ -623,6 +720,12 @@ namespace CESidearmsSupply.Patches
                 rec.meleeRoleVetoed = false;
             }
             CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
+            // The Any() guard mirrors the one SS's own equip path applies BEFORE calling
+            // InformOfAddedPrimary (JobDriver_Equip's MemoriseWeaponAboutToBeEquipped) —
+            // InformOfAddedSidearm itself has no duplicate check. Using InformOfAddedPrimary
+            // for a not-yet-remembered weapon, side effects included (it becomes the
+            // category default; a same-category force is cleared), is exactly what SS does
+            // when the same weapon is equipped from the ground — mirrored deliberately.
             if (memory != null && !memory.RememberedWeapons.Any(p => p == newEq.toThingDefStuffDefPair()))
             {
                 memory.InformOfAddedPrimary(newEq);
