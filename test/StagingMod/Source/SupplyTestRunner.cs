@@ -3163,6 +3163,15 @@ namespace CESupplyTestStaging
                         w.Destroy();
                     }
                     dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    // Clear the projection's claim and SS's memory of the pair: a
+                    // REMEMBERED ground weapon is fetched by SS's retrieval (to
+                    // inventory), which satisfies the row before CE's equip branch can
+                    // fire — the isolated run lost that race every time. With no memory,
+                    // only CE's loadout machinery wants the sniper, and the equip branch
+                    // is the sole path back to the pawn's hands.
+                    var recNow = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                    recNow?.claimed.RemoveAll(pr => pr.thing == sniper);
+                    Mem(dockie).RememberedWeapons.RemoveAll(pr => pr.thing == sniper);
                     GenSpawn.Spawn(ThingMaker.MakeThing(sniper),
                         CellFinder.RandomClosewalkCellNear(dockie.Position, dockie.Map, 4),
                         dockie.Map);
