@@ -114,8 +114,14 @@ namespace CESupplyTestStaging
             // it fires on a save this module has never touched.
             "had a null weapon memory, removing",
             "had a missing def or malformed data, removing",
-            // The harness itself.
-            "[SupplyTest]",
+            // The harness's own informational lines — NOT a blanket prefix: the
+            // runner's "threw:" error reports must stay visible to this gate, or a dead
+            // poll/mutate is excused by the very instrument meant to catch it.
+            "[SupplyTest] Phase ",
+            "[SupplyTest] Isolated run",
+            "[SupplyTest] Results written",
+            "[SupplyTest] Scenario complete",
+            "[SupplyTest] UseOutfitStand def absent",
             "[SupplyStaging]",
             // RimBridge logs startup telemetry at Warning level, and its startup straddles
             // the point where this scenario baselines the log. It is a development tool in
@@ -287,6 +293,11 @@ namespace CESupplyTestStaging
                 catch (Exception e)
                 {
                     Log.Error($"[SupplyTest] poll for '{phase.label}' threw: " + e);
+                    // A phase whose driver is dead is not observing anything — failing it
+                    // beats silently degrading its driven window to a passive one.
+                    phase.failed = true;
+                    AdvancePhase();
+                    return;
                 }
             }
 
@@ -336,6 +347,13 @@ namespace CESupplyTestStaging
                     if (!check.informational)
                     {
                         allPass = false;
+                        if (check.precondition)
+                        {
+                            // A throwing precondition means the world was never ready —
+                            // the phase must report VOID (tested nothing), not FAIL
+                            // (blaming the product for a broken setup).
+                            preconditionsHold = false;
+                        }
                     }
                 }
             }
@@ -627,6 +645,28 @@ namespace CESupplyTestStaging
             CompSidearmMemory memory = Mem(pawn);
             var rec = CESidearmsSupply.CompLoadoutSidearms.For(pawn);
 
+            // Loadout-level flags are shared state a phase can mutate (one did, and every
+            // later sequenced phase then ran adHoc-off while the isolated runs ran
+            // adHoc-on — two measurably different worlds). Staged values, restored.
+            loadout.adHoc = true;
+            loadout.adHocMags = 2;
+            // A drafted pawn runs no think tree: CE never hauls, SS never re-arms, and a
+            // phase that failed mid-draft (one can) leaks a dead world to everything after.
+            if (pawn.drafter != null && pawn.drafter.Drafted)
+            {
+                pawn.drafter.Drafted = false;
+            }
+            // Ground litter from earlier phases' drops: a spawned weapon on this test map
+            // is never scenery, and CE will otherwise haul it mid-phase.
+            foreach (Thing stray in pawn.Map.listerThings
+                         .ThingsInGroup(ThingRequestGroup.Weapon).ToList())
+            {
+                if (stray.Spawned && !stray.Destroyed)
+                {
+                    stray.Destroy();
+                }
+            }
+
             // Player intent first: SS's role setters clear forced state as a side effect, so
             // clearing intent after seeding memory would undo part of the seeding.
             memory.UnsetForcedWeapon(drafted: false);
@@ -797,6 +837,7 @@ namespace CESupplyTestStaging
             bool tabSwitchRole = false;
             bool sniperWasPrimaryAtEquip = false;
             bool shotgunWasDropped = false;
+            bool gizmoForgetShotgunDropped = false;
             bool machineEquipLanded = false;
             bool sniperWasExcludedAtDrop = false;
             ThingDefStuffDefPair? meleeRoleAtSettle = null;
@@ -815,6 +856,8 @@ namespace CESupplyTestStaging
             bool loadoutSwitchClearedAll = false;
             bool loadoutSwitchStayedClear = false;
             bool standEquipWithdrew = false;
+            bool forcedPairSurvivedRelease = false;
+            bool releaseTookTheRest = false;
             bool featureOffSweptThisColony = false;
             bool featureOffArmedTheFlag = false;
 
@@ -1485,6 +1528,19 @@ namespace CESupplyTestStaging
                 label = "forgetting-a-carried-weapon-in-the-gizmo-sticks",
                 deadlineTicks = 12000,
                 minTicks = 900,
+                poll = () =>
+                {
+                    // Confirm the gesture's drop half (it can fail quietly) and drive the
+                    // window: the never-re-claimed negative means nothing unless
+                    // reconciles actually run while the shotgun is back in the inventory.
+                    if (!gizmoForgetShotgunDropped
+                        && !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                               .Any(w => w.def == shotgun))
+                    {
+                        gizmoForgetShotgunDropped = true;
+                    }
+                    ForceReconcile(dockie);
+                },
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
@@ -1515,13 +1571,16 @@ namespace CESupplyTestStaging
                         bool excluded = rec != null && rec.dontEquip.Any(p => p.thing == shotgun);
                         return (excluded, $"shotgun in dontEquip={excluded}");
                     }),
-                    P("shotgun-is-carried-again", () =>
+                    C("dropped-and-carried-again", () =>
                     {
-                        // CE hauls it back for the still-declared row. Until it has, this
-                        // phase is not yet testing the thing it claims to.
+                        // The old form was a precondition — which latched on Baseline's
+                        // own possession BEFORE the drop, so "CE hauled it back" was
+                        // never actually gated on it having left. Confirmed-drop first,
+                        // then carried again.
                         var carried = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                             .Any(w => w.def == shotgun);
-                        return (carried, $"carried={carried}");
+                        return (gizmoForgetShotgunDropped && carried,
+                                $"dropped={gizmoForgetShotgunDropped} carried again={carried}");
                     }),
                     N("never-re-claimed", () =>
                     {
@@ -1707,7 +1766,25 @@ namespace CESupplyTestStaging
                 label = "a-suppressed-weapon-is-refused-to-the-machine-and-offered-to-the-player",
                 deadlineTicks = 20000,
                 minTicks = 600,
-                poll = () => ForceReconcile(dockie),
+                poll = () =>
+                {
+                    ForceReconcile(dockie);
+                    // The re-arm is DRIVEN through SS's real funnel rather than raced
+                    // against think-tree cadence: with the ground pool swept, SS's
+                    // retrieval wins the fetch and parks the sniper in the inventory,
+                    // and the idle re-arm giver does not reliably fire mid-wander. This
+                    // is the same driven style as ForceReconcile — and it is exactly the
+                    // selection-plus-funnel path the exclusion must survive: the sniper
+                    // must win it, the excluded pistol must not.
+                    if (dockie.equipment?.Primary == null
+                        && dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                               .Any(w => w.def.IsRangedWeapon))
+                    {
+                        WeaponAssingment.equipBestWeaponFromInventoryByPreference(
+                            dockie, PeteTimesSix.SimpleSidearms.Utilities.Enums.DroppingModeEnum.Calm,
+                            PeteTimesSix.SimpleSidearms.Utilities.Enums.PrimaryWeaponMode.Ranged);
+                    }
+                },
                 arrange = () =>
                 {
                     Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
@@ -1717,6 +1794,13 @@ namespace CESupplyTestStaging
                 mutate = () =>
                 {
                     dockie.equipment.DestroyAllEquipment();
+                    // The re-arm this phase expects is CE fetching a fresh sniper for the
+                    // now-unsatisfied row and equipping it (primary is empty). It used to
+                    // lean on the staging map's ground pool — which Baseline's litter
+                    // sweep now clears — so the phase brings its own.
+                    GenSpawn.Spawn(ThingMaker.MakeThing(sniper),
+                        CellFinder.RandomClosewalkCellNear(dockie.Position, dockie.Map, 4),
+                        dockie.Map);
                 },
                 checks =
                 {
@@ -1833,6 +1917,7 @@ namespace CESupplyTestStaging
             {
                 label = "an-excluded-weapon-is-still-hauled-back",
                 deadlineTicks = 25000,
+                minTicks = 600,
                 poll = () =>
                 {
                     // The gesture's drop half can fail quietly (both drop APIs return a
@@ -1857,6 +1942,14 @@ namespace CESupplyTestStaging
                             dockie.inventory?.innerContainer?.TryDrop(t2, dockie.Position, dockie.Map,
                                 ThingPlaceMode.Near, out _);
                         }
+                    }
+                    else
+                    {
+                        // Post-return, the never-re-claimed negative needs reconciles to
+                        // actually run against the returned weapon — without this the
+                        // window was passive and the phase usually ended on the very poll
+                        // the shotgun came back.
+                        ForceReconcile(dockie);
                     }
                 },
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
@@ -2813,11 +2906,70 @@ namespace CESupplyTestStaging
                 Log.Message("[SupplyTest] UseOutfitStand def absent — stand phase skipped.");
             }
 
+            // Release() hands claims back but must NOT touch a pair the player forced:
+            // forgetting a pair's last copy clears the force as an SS side effect, with
+            // nothing to tell the player. The skip has existed since the sweep was
+            // written; until this phase, deleting it changed no verdict anywhere.
+            phases.Add(new Phase
+            {
+                label = "a-forced-pair-survives-the-release",
+                deadlineTicks = 4000,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper, shotgun, pistol, gladius);
+                    InGizmo(() => Mem(dockie).SetWeaponAsForced(
+                        new ThingDefStuffDefPair(shotgun, null), drafted: false));
+                },
+                mutate = () =>
+                {
+                    try
+                    {
+                        CESidearmsSupply.SupplyMod.Release(interactive: true);
+                        var mem = Mem(dockie);
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        forcedPairSurvivedRelease =
+                            mem.ForcedWeapon?.thing == shotgun
+                            && mem.RememberedWeapons.Any(pr => pr.thing == shotgun);
+                        releaseTookTheRest = rec != null
+                            && rec.claimed.All(pr => pr.thing == shotgun)
+                            && !mem.RememberedWeapons.Any(pr => pr.thing == sniper);
+                    }
+                    finally
+                    {
+                        InGizmo(() => Mem(dockie).UnsetForcedWeapon(drafted: false));
+                    }
+                    ForceReconcile(dockie);
+                },
+                checks =
+                {
+                    P("the-shotgun-is-forced-and-claimed", () =>
+                    {
+                        var rec = CESidearmsSupply.CompLoadoutSidearms.For(dockie);
+                        bool forced = Mem(dockie).ForcedWeapon?.thing == shotgun;
+                        bool claimed = rec != null && rec.claimed.Any(pr => pr.thing == shotgun);
+                        return (forced && claimed, $"forced={forced} claimed={claimed}");
+                    }),
+                    C("the-force-and-its-memory-survive-the-sweep", () =>
+                    {
+                        return (forcedPairSurvivedRelease, $"survived={forcedPairSurvivedRelease}");
+                    }),
+                    C("everything-unforced-was-released", () =>
+                    {
+                        return (releaseTookTheRest, $"rest released={releaseTookTheRest}");
+                    }),
+                }
+            });
+
             // Standing invariant, appended to every phase: nothing is ever both excluded
             // and remembered. A pair on both lists means a machine path wrote SS memory
             // back behind the recorder — the permanent-leak state the self-heal exists to
-            // clear. Every player gesture that re-adds a weapon withdraws its exclusion
-            // first, so there is no legitimate way to be on both lists at a poll boundary.
+            // clear. HONEST SCOPE: this holds at poll boundaries only because any phase
+            // that lands a machine equip also drives a reconcile in its poll (the
+            // machine-equip phase does) — the self-heal runs before the checks see the
+            // transient. A future phase that lands a machine equip WITHOUT a reconciling
+            // poll will trip this on a correct product; give it one, or expect ~1300
+            // ticks of legitimate transient. It is also one-eyed by design: it cannot
+            // see the symmetric leak (an exclusion lost while the memory stays).
             foreach (Phase phase in phases)
             {
                 phase.checks.Add(N("no-pair-is-both-excluded-and-remembered", () =>

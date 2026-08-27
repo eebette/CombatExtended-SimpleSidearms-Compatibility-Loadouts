@@ -8,6 +8,7 @@ whole shape and prints the failing checks rather than the raw JSON, because a
 dump of sixteen passing phases buries the one that matters.
 """
 import json
+import os
 import re
 import sys
 
@@ -130,7 +131,7 @@ def merge(paths):
     merged["passed"] = merged["passed"] and all(
         p.get("passed") and not p.get("invalid") for p in merged["phases"]
     )
-    tmp = "/tmp/verdict-merged.json"
+    tmp = f"/tmp/verdict-merged-{os.getpid()}.json"
     with open(tmp, "w") as fh:
         json.dump(merged, fh)
     return main(tmp)

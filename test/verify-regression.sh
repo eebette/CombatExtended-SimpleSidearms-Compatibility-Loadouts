@@ -46,7 +46,18 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 for ph in d["phases"]:
     if ph["label"] == sys.argv[2]:
-        print("invalid" if ph.get("invalid") else ("passed" if ph.get("passed") else "failed"))
+        if ph.get("invalid"):
+            print("invalid")
+        elif ph.get("passed"):
+            print("passed")
+        else:
+            gating = [c for c in ph.get("checks", []) if not c.get("informational")]
+            if gating and all(c.get("detail") in (None, "") for c in gating):
+                # failed with zero evaluated checks: setup/mutate threw before anything
+                # was observed — pins an API signature, not the semantics.
+                print("unevaluated")
+            else:
+                print("failed")
         sys.exit(0)
 print("absent")
 PY
@@ -71,8 +82,23 @@ else
 fi
 trap restore EXIT
 
-if build && run; then :; fi
-mv -f "$RESULT" "$AB_A" 2>/dev/null || true
+# A stale quarantine file must never answer for a leg that did not run.
+rm -f "$AB_A"
+if ! build; then
+    restore; trap - EXIT; build
+    echo "!! A: the tree does not BUILD without the fix — the pair shares an API, so this" >&2
+    echo "!! A/B pins the signature, not the semantics. Verify with an in-place scratch" >&2
+    echo "!! mutation instead." >&2
+    exit 1
+fi
+run
+if [[ ! -f "$RESULT" ]]; then
+    restore; trap - EXIT; build
+    echo "!! A: the run produced no result file (crash/timeout before WriteResults) —" >&2
+    echo "!! nothing was observed; not evidence about the fix." >&2
+    exit 1
+fi
+mv -f "$RESULT" "$AB_A"
 A=$(phase_state "$AB_A" || echo absent)
 restore; trap - EXIT
 # The A leg built the mod from the reverted source; rebuild on EVERY path out —
@@ -81,6 +107,10 @@ build
 
 case "$A" in
     failed)  echo "   A: failed — the test detects the regression" ;;
+    unevaluated)
+        echo "!! A: the phase failed before any check evaluated (setup/mutate threw on the" >&2
+        echo "!! old tree) — artifact evidence; it pins the signature, not the semantics." >&2
+        exit 1 ;;
     invalid) echo "!! A: VOID — the phase's setup broke without the fix; it proves nothing about it" >&2; exit 1 ;;
     passed)  echo "!! A: PASSED without the fix — the test does not pin it" >&2; exit 1 ;;
     *)       echo "!! A: phase '$PHASE' not found in results" >&2; exit 1 ;;
