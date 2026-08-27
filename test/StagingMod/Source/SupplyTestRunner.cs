@@ -2602,18 +2602,24 @@ namespace CESupplyTestStaging
                 arrange = () =>
                 {
                     Baseline(dockie, loadout, sniper, pistol);
-                    // Under CE, SS's DPS picker scores an ammo-less gun as unusable — the
-                    // runner-up needs rounds to be pickable at all.
-                    ThingDef pistolAmmo = pistol.GetCompProperties<CombatExtended.CompProperties_AmmoUser>()
-                        ?.ammoSet?.ammoTypes?.FirstOrDefault()?.ammo;
-                    if (pistolAmmo != null
-                        && !dockie.inventory.innerContainer.Any(t => t.def == pistolAmmo))
+                    // Under CE, SS's DPS picker scores an ammo-less gun as unusable. BOTH
+                    // guns need rounds: the runner-up to be pickable at all, and the
+                    // excluded sniper to be genuinely tempting — without its ammo the old
+                    // exemption bug picked the pistol too and the A/B could not tell the
+                    // trees apart.
+                    foreach (ThingDef gun in new[] { sniper, pistol })
                     {
-                        Thing rounds = ThingMaker.MakeThing(pistolAmmo);
-                        rounds.stackCount = 60;
-                        dockie.inventory.innerContainer.TryAdd(rounds);
-                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                        ThingDef rounds = gun.GetCompProperties<CombatExtended.CompProperties_AmmoUser>()
+                            ?.ammoSet?.ammoTypes?.FirstOrDefault()?.ammo;
+                        if (rounds != null
+                            && !dockie.inventory.innerContainer.Any(t => t.def == rounds))
+                        {
+                            Thing stack = ThingMaker.MakeThing(rounds);
+                            stack.stackCount = 60;
+                            dockie.inventory.innerContainer.TryAdd(stack);
+                        }
                     }
+                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
                     PlayerForgets(dockie, sniper);
                     // No ranged role, so SS's picker path (findBestRangedWeapon) is the
                     // live one — the exact path that reads carried weapons raw.
