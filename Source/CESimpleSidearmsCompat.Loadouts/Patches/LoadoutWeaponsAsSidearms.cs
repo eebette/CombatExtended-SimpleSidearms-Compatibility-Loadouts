@@ -171,9 +171,11 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             // still belong to this projection, and CE reassigns every pawn of a deleted
             // loadout to the default one on an unconfirmed float-menu click. Without the
             // release here, those claims survived with nobody to release them, and the
-            // compat patch's drop exemption then pinned the weapons in every pawn's
-            // inventory forever. The player's own memories, exclusions and role vetoes are
-            // not claims and survive untouched.
+            // compat patch's drop shield (count-aware since its R2: it protects as many
+            // copies as are remembered or listed, and lets CE trim the rest) then kept
+            // the claimed copies in every pawn's inventory with nobody to release them.
+            // The player's own memories, exclusions and role vetoes are not claims and
+            // survive untouched.
             Loadout loadout = pawn.GetLoadout();
 
             // Exclusions and role vetoes belong to the loadout ASSIGNMENT — ephemeral by
@@ -345,6 +347,40 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
         /// player cleared by hand, and a role naming a weapon the loadout does not list which
         /// the pawn is still carrying.
         /// </summary>
+        /// <summary>
+        /// What the def fires by default — the ammo-independent reading of "is this an
+        /// EMP weapon". The vanilla published fields, read directly: SS's own predicate
+        /// answers for the loaded round under the compat patch, which is the wrong
+        /// question for a persistent role.
+        /// </summary>
+        private static bool DefNatureEMP(ThingDef def)
+        {
+            ProjectileProperties projectile = def?.Verbs?.FirstOrDefault()?.defaultProjectile?.projectile;
+            return projectile != null && projectile.damageDef == DamageDefOf.EMP;
+        }
+
+        /// <summary>
+        /// Def-level "dangerous": building-destroyers by verb flag, incendiary/explosive
+        /// by the default projectile. Melee weapons carry no ranged verbs and pass — an
+        /// incendiary persona blade loses the filter here, accepted: it is def-stable
+        /// either way, and the ranged default is the role this filter protects.
+        /// </summary>
+        private static bool DefNatureDangerous(ThingDef def)
+        {
+            VerbProperties verb = def?.Verbs?.FirstOrDefault();
+            if (verb == null)
+            {
+                return false;
+            }
+            if (verb.ai_IsBuildingDestroyer)
+            {
+                return true;
+            }
+            ProjectileProperties projectile = verb.defaultProjectile?.projectile;
+            return projectile != null
+                && (projectile.damageDef == DamageDefOf.Flame || projectile.explosionRadius > 0.1f);
+        }
+
         private static void AssertRoles(Pawn pawn, CompSidearmMemory memory, CompLoadoutSidearms rec,
                                         List<ThingDef> declared, HashSet<ThingDefStuffDefPair> target,
                                         ThingDefStuffDefPair? forced)
@@ -357,8 +393,15 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             // weapon UNCONDITIONALLY, skipping every filter its own picker applies. So a
             // pair may be claimed (carried per the loadout) yet ineligible for a role —
             // tools, manual-use weapons, incendiary/building-destroyers, EMP — or SS will
-            // draft-equip a fire extinguisher. Composed from SS's own public predicates,
-            // so its policy changes follow automatically.
+            // draft-equip a fire extinguisher.
+            //
+            // Eligibility judges what the weapon IS (its def), never what it is LOADED
+            // with. The compat patch makes SS's classification predicates follow the
+            // loaded round — correct for SS's live swap filters, which are about right
+            // now — but a role is persistent, and feeding it transient classification
+            // meant a magazine swap could evict a role and physically re-arm the pawn
+            // (compat adversarial round 3, exported here). Manual-use and tool checks
+            // stay on SS's own predicates: those read def-stable verb properties.
             var roleEligible = new HashSet<ThingDefStuffDefPair>();
             foreach (ThingWithComps weapon in pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true))
             {
@@ -368,8 +411,8 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                 }
                 ThingDefStuffDefPair pair = weapon.toThingDefStuffDefPair();
                 if (!target.Contains(pair) || roleEligible.Contains(pair) || pair.isToolNotWeapon()
-                    || GettersFilters.isManualUse(weapon) || GettersFilters.isDangerousWeapon(weapon)
-                    || GettersFilters.isEMPWeapon(weapon))
+                    || GettersFilters.isManualUse(weapon) || DefNatureDangerous(weapon.def)
+                    || DefNatureEMP(weapon.def))
                 {
                     continue;
                 }

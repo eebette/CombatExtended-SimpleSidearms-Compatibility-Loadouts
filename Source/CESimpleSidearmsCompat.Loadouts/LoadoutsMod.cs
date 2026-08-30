@@ -57,9 +57,10 @@ namespace CESimpleSidearmsCompat.Loadouts
                 + "melee the preferred melee weapon. Removing a weapon from the loadout makes the pawn "
                 + "forget it as a sidearm, which is what lets CE clear it out of the inventory.");
 
-            // Turning it off has to undo it, not freeze it: the compat patch exempts every
-            // remembered weapon from CE's drop, so claims left behind with nobody to release
-            // them pin weapons in inventories with no way back short of the gizmo. Release()
+            // Turning it off has to undo it, not freeze it: the compat patch's drop
+            // shield protects remembered copies up to the remembered/row count, so claims
+            // left behind with nobody to release them keep those copies in inventories
+            // with no way back short of the gizmo. Release()
             // itself arms releasePending whenever the feature is off — settings are global
             // and the sweep is per-colony, so every OTHER save gets its sweep on next load.
             if (was && !Settings.loadoutWeaponsAsSidearms)

@@ -19,7 +19,7 @@ phase that was never reached is not marked failed — so a run that stopped earl
 `passed: true`. Until 2026-08-24 the script `cat`ed the file and exited 0 regardless, so
 every green result it ever produced meant only that a file had been written.
 
-`supply1` covers, currently in 43 phases (one DLC-gated — the outfit-stand phase self-skips without its JobDef): initial reconcile and physical fetch (memory contents,
+`supply1` covers, currently in 46 phases (one DLC-gated — the outfit-stand phase self-skips without its JobDef): initial reconcile and physical fetch (memory contents,
 roles, gladius stuff fix-up), reorder → role flip, a hand-set role on a DECLARED weapon
 yielding to the loadout, a FORCED weapon surviving reconcile untouched, template forget,
 manual-memory protection through template churn, pre-existing memory claimed by the loadout,
@@ -201,3 +201,26 @@ not a test.
   Sidearm memories the mod wrote remain as ordinary SS data; "Release all claimed
   sidearms" before uninstalling clears them.
 - Dev log: no red errors from [CE+SS Loadouts]; any [CE+SS Loadouts] Log.ErrorOnce is a failure.
+
+## Combined-config phases (compat #42 import, 2026-08-30)
+
+Three phases pin behaviors that exist only with BOTH mods enabled — the normal
+player configuration, which the compat suite deliberately never runs (it tests
+the compat patch alone):
+
+- `a-role-judges-the-def-not-the-magazine` — role eligibility reads the def's
+  nature (default projectile), not the loaded round; a magazine swap can no
+  longer evict a role. Pinned by A/B (the old instance-classification code
+  keeps the role on an EMP-natured def as long as it happens to be loaded with
+  FMJ). The def's nature is flipped in place and restored because no base-CE
+  primary-EMP round loads into a role-eligible weapon — the live trigger is
+  modded content, the mechanism identical.
+- `an-excluded-swap-cannot-eat-a-reload` — the three-hook collision (compat
+  reload guard ends, our funnel veto refuses, compat repair restarts): end
+  state pinned as reload-running + excluded weapon never in hand. Rides on
+  cross-mod prefix registration order nothing else pins.
+- `claims-follow-materials-and-the-shield-honors-them` — a declared def's
+  claims span carried materials, and the compat patch's def-level drop shield
+  protects the resulting multiset: a "knife x1" row with two looted materials
+  keeps both. Pinned as intended combined semantics (claims mean "these
+  carried weapons are loadout-managed"; counts live CE-side).

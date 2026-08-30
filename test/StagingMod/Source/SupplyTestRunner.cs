@@ -571,6 +571,14 @@ namespace CESupplyTestStaging
 
         private static CompSidearmMemory Mem(Pawn pawn) => CompSidearmMemory.GetMemoryCompForPawn(pawn);
 
+        // Captured synchronously inside the combined-config phases (compat #42 export).
+        private ThingDef roleAfterNatureFlip;
+        private ThingDef roleAfterRestore;
+        private JobDef reloadAfterVeto;
+        private bool vetoExclusionHeld;
+        private int materialClaims;
+        private bool knifeExcessAfterShield;
+
         private static void ForceReconcile(Pawn pawn)
         {
             // The reconcile itself, nothing else. Going through CE's TryGiveJob would also
@@ -3383,6 +3391,165 @@ namespace CESupplyTestStaging
                             : "on both lists: " + string.Join(",", both.Select(pr => pr.thing?.defName)));
                 }));
             }
+
+            // ---- combined-config phases (compat repo adversarial round 3, issue #42):
+            // both mods enabled is the normal player configuration, and these three
+            // interactions exist in neither repo alone. ----
+
+            phases.Add(new Phase
+            {
+                // A role is persistent; classification under the compat patch follows the
+                // loaded round. Role eligibility now judges the DEF. The def's nature is
+                // flipped in place (and restored) because no base-CE round with a primary
+                // EMP projectile loads into a role-eligible weapon — the live trigger is
+                // modded content, the mechanism is identical.
+                label = "a-role-judges-the-def-not-the-magazine",
+                deadlineTicks = 8000,
+                arrange = () => Baseline(dockie, loadout, sniper, pistol),
+                checks =
+                {
+                    P("sniper-holds-the-ranged-role", () =>
+                        (Mem(dockie).DefaultRangedWeapon?.thing == sniper,
+                         $"role={Mem(dockie).DefaultRangedWeapon?.thing?.defName ?? "-"}")),
+                    C("an-emp-natured-def-loses-the-role-to-the-next-declared", () =>
+                        (roleAfterNatureFlip == pistol,
+                         $"roleAfterFlip={roleAfterNatureFlip?.defName ?? "-"} (want {pistol.defName})")),
+                    C("restoring-the-def-restores-the-role", () =>
+                        (roleAfterRestore == sniper,
+                         $"roleAfterRestore={roleAfterRestore?.defName ?? "-"} (want {sniper.defName})")),
+                },
+                mutate = () =>
+                {
+                    VerbProperties verb = sniper.Verbs[0];
+                    ThingDef was = verb.defaultProjectile;
+                    try
+                    {
+                        verb.defaultProjectile = D("Bullet_40x47mmGrenade_EMP");
+                        ForceReconcile(dockie);
+                        roleAfterNatureFlip = Mem(dockie).DefaultRangedWeapon?.thing;
+                    }
+                    finally
+                    {
+                        verb.defaultProjectile = was;
+                    }
+                    ForceReconcile(dockie);
+                    roleAfterRestore = Mem(dockie).DefaultRangedWeapon?.thing;
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                // The three-hook collision: the compat reload guard ends the reload to
+                // make way for the swap, this module's funnel veto refuses the excluded
+                // weapon, the compat repair restarts the reload. The end state — reload
+                // running, excluded weapon never in hand — is the cross-mod contract, and
+                // it currently rides on prefix registration order nothing else pins.
+                label = "an-excluded-swap-cannot-eat-a-reload",
+                deadlineTicks = 15000,
+                arrange = () => Baseline(dockie, loadout, sniper, pistol),
+                checks =
+                {
+                    // Prerequisites only — the exclusion and the reload are created inside
+                    // the act itself (a precondition on post-act state deadlocks the
+                    // deferred mutate; learned twice now).
+                    P("sniper-and-pistol-carried", () =>
+                    {
+                        bool sn = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true).Any(w => w.def == sniper);
+                        bool pi = dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true).Any(w => w.def == pistol);
+                        return (sn && pi, $"sniper={sn} pistol={pi}");
+                    }),
+                    C("the-exclusion-took", () =>
+                        (vetoExclusionHeld, $"pistolExcludedAtAct={vetoExclusionHeld}")),
+                    C("the-reload-survives-or-restarts", () =>
+                        (reloadAfterVeto == CE_JobDefOf.ReloadWeapon,
+                         $"jobAfterSwapAttempt={reloadAfterVeto?.defName ?? "none"}")),
+                    N("the-excluded-pistol-never-lands-in-hand", () =>
+                        (dockie.equipment?.Primary?.def != pistol,
+                         $"primary={dockie.equipment?.Primary?.def?.defName ?? "-"}")),
+                },
+                mutate = () =>
+                {
+                    // Exclude the pistol the player's way (gizmo forget), put the sniper
+                    // in hand, drain it with spares available, start the reload — then
+                    // fire the swap attempt straight at the funnel.
+                    PlayerForgets(dockie, pistol);
+                    ThingWithComps sniperThing = dockie.equipment?.Primary?.def == sniper
+                        ? dockie.equipment.Primary
+                        : dockie.inventory.innerContainer.OfType<ThingWithComps>().First(t => t.def == sniper);
+                    if (dockie.equipment?.Primary != sniperThing)
+                    {
+                        dockie.TryGetComp<CompInventory>().TrySwitchToWeapon(sniperThing);
+                    }
+                    CompAmmoUser user = sniperThing.TryGetComp<CompAmmoUser>();
+                    user.ResetAmmoCount();
+                    user.CurMagCount = 0;
+                    var spare = ThingMaker.MakeThing((ThingDef)user.selectedAmmo);
+                    spare.stackCount = user.MagSize * 2;
+                    dockie.inventory.innerContainer.TryAdd(spare, canMergeWithExistingStacks: false);
+                    dockie.TryGetComp<CompInventory>().UpdateInventory();
+                    Verse.AI.Job reload = user.TryMakeReloadJob();
+                    dockie.jobs.StartJob(reload, Verse.AI.JobCondition.InterruptForced);
+
+                    var recAtAct = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
+                    vetoExclusionHeld = recAtAct != null && recAtAct.dontEquip.Any(pr => pr.thing == pistol);
+                    ThingWithComps pistolThing = dockie.inventory.innerContainer
+                        .OfType<ThingWithComps>().First(t => t.def == pistol);
+                    WeaponAssingment.equipSpecificWeapon(dockie, pistolThing,
+                        dropCurrent: false, intentionalDrop: false);
+                    reloadAfterVeto = dockie.CurJobDef;
+                }
+            });
+
+            phases.Add(new Phase
+            {
+                // The reconcile claims every carried material of a declared def, and the
+                // compat patch's def-level shield honors the resulting multiset — so a
+                // "knife x1" row with two looted materials keeps BOTH. Pinned as the
+                // intended combined semantics: claims mean "these carried weapons are
+                // loadout-managed", counts live CE-side.
+                label = "claims-follow-materials-and-the-shield-honors-them",
+                deadlineTicks = 8000,
+                arrange = () =>
+                {
+                    ThingDef knife = D("MeleeWeapon_Knife");
+                    foreach (Thing old in dockie.inventory.innerContainer
+                        .Where(t => t.def == knife).ToList())
+                    {
+                        old.Destroy(DestroyMode.Vanish);
+                    }
+                    var steel = (ThingWithComps)ThingMaker.MakeThing(knife, D("Steel"));
+                    dockie.inventory.innerContainer.TryAdd(steel, canMergeWithExistingStacks: false);
+                    dockie.TryGetComp<CompInventory>().UpdateInventory();
+                    Baseline(dockie, loadout, D("MeleeWeapon_Knife"), sniper);
+                },
+                checks =
+                {
+                    P("the-steel-knife-is-claimed", () =>
+                    {
+                        var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
+                        int claims = rec?.claimed.Count(pr => pr.thing == D("MeleeWeapon_Knife")) ?? 0;
+                        return (claims == 1, $"knifeClaims={claims}");
+                    }),
+                    C("both-materials-end-up-claimed", () =>
+                        (materialClaims == 2, $"knifeClaims={materialClaims} (want 2)")),
+                    C("the-shield-protects-both-copies", () =>
+                        (!knifeExcessAfterShield,
+                         $"excessProposed={knifeExcessAfterShield} (want none — both materials remembered)")),
+                },
+                mutate = () =>
+                {
+                    ThingDef knife = D("MeleeWeapon_Knife");
+                    var plasteel = (ThingWithComps)ThingMaker.MakeThing(knife, D("Plasteel"));
+                    dockie.inventory.innerContainer.TryAdd(plasteel, canMergeWithExistingStacks: false);
+                    dockie.TryGetComp<CompInventory>().UpdateInventory();
+                    ForceReconcile(dockie);
+                    ForceReconcile(dockie);
+                    var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
+                    materialClaims = rec?.claimed.Count(pr => pr.thing == knife) ?? 0;
+                    knifeExcessAfterShield = Utility_HoldTracker.GetExcessThing(dockie, out Thing proposed, out int _)
+                        && proposed?.def == knife;
+                }
+            });
 
             return phases;
         }
