@@ -38,6 +38,14 @@ action re-running the reconcile, others hold across natural cadence only; setup 
 are `P()` preconditions; one-shot outcomes are `C()`, sampled at the act when the state
 is transient.
 
+
+**Module isolation (2026-08-31):** the Tactics module ships its behaviors ON by
+default, so with it in the shared mod list every SUPPLY scenario ran with its
+findBest re-ranks and reload-abort component active. The runner now forces all
+Tactics toggles off in-memory (`DisableTacticsModule`) and fails LOUD if the
+module is present but the reflection misses. The core compat patch stays
+active on purpose — it is this module's declared dependency.
+
 ## Benchmark
 
 `./test/run-supply-bench.sh [label]` loads SUPPLY-1 and answers the two questions that decide

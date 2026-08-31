@@ -148,6 +148,52 @@ namespace CESupplyTestStaging
         /// metadata complaints, startup telemetry, whatever the profile's other mods say on
         /// their way up. Only what the run provokes can be attributed to it.
         /// </summary>
+        /// <summary>
+        /// The Tactics module ships its behaviors ON by default; with it in the mod
+        /// list its findBest re-ranks and reload-abort component would run inside
+        /// every SUPPLY scenario. All its behaviors are toggle-gated, so switching
+        /// the toggles off in-memory is a full disable — and a rename fails LOUD
+        /// instead of silently testing a contaminated world. The core compat patch
+        /// stays active on purpose: it is this module's declared dependency.
+        /// </summary>
+        private static void DisableTacticsModule()
+        {
+            try
+            {
+                bool tacticsActive = ModsConfig.IsActive("eebette.CESimpleSidearmsCompat.Tactics")
+                    || HarmonyLib.Harmony.GetAllPatchedMethods().Any(m =>
+                        HarmonyLib.Harmony.GetPatchInfo(m)?.Owners.Any(o => o.Contains("CESimpleSidearmsCompat.Tactics")) ?? false);
+                Type mod = GenTypes.GetTypeInAnyAssembly("CESSCompatTactics.TacticsMod");
+                object settings = mod?.GetProperty("Settings")?.GetValue(null);
+                if (settings == null)
+                {
+                    if (tacticsActive)
+                    {
+                        Log.Error("[SupplyTest] Tactics module is ACTIVE but its settings type was not "
+                                  + "found (renamed?) — scenarios are contaminated by its features.");
+                    }
+                    return;
+                }
+                foreach (string name in new[] { "reloadAbort", "forcedDryFallthrough", "ammoDepthTiebreak",
+                                                "targetAwareAmmoScoring", "armorAwareMelee" })
+                {
+                    System.Reflection.FieldInfo field = settings.GetType().GetField(name);
+                    if (field == null)
+                    {
+                        Log.Error($"[SupplyTest] Tactics settings found but '{name}' is gone — cannot "
+                                  + "switch that feature off; scenarios are contaminated by it.");
+                        continue;
+                    }
+                    field.SetValue(settings, false);
+                }
+                Log.Message("[SupplyTest] Tactics module switched off (in-memory) for this run.");
+            }
+            catch (Exception e)
+            {
+                Log.Error("[SupplyTest] Could not disable Tactics module — scenarios may be contaminated: " + e.Message);
+            }
+        }
+
         private void BaselineDiagnostics()
         {
             foreach (LogMessage msg in Log.Messages)
@@ -241,6 +287,7 @@ namespace CESupplyTestStaging
                     Root.Shutdown();
                     return;
                 }
+                DisableTacticsModule();
                 BaselineDiagnostics();
                 active = true;
                 Find.TickManager.CurTimeSpeed = TimeSpeed.Superfast;
