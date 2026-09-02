@@ -1,4 +1,4 @@
-# Test plan — Sidearms & Supply
+# Test plan — Loadouts module
 
 **Most of this plan is automated.** `test/run-supply-assert.sh <scenario> <save>` loads a
 staged save and runs in-game assertions (`test/StagingMod/Source/SupplyTestRunner.cs`),
