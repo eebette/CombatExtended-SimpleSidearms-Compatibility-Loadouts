@@ -45,9 +45,12 @@ never lists are not touched.
 
 Two things outrank the loadout, both because they are explicit:
 
-- **Forcing a weapon** (SS's force gizmo) and **"prefer unarmed"** are never touched. SS
-  checks a forced weapon before any default, and its role setters would clear these as a side
-  effect, so the projection stays out of the way entirely.
+- **Forcing a weapon** (SS's force gizmo) and **"prefer unarmed"** are never touched *by the
+  projection*: SS checks a forced weapon before any default, and its role setters would clear
+  these as a side effect, so the reconcile stays out of the way entirely. Your own equip
+  gestures follow Simple Sidearms' normal rules — hand-equipping a weapon that is not yet in
+  the sidearm list makes it the category default and clears a same-category force, exactly as
+  it would when equipped from the ground.
 - **A weapon you equip that the loadout doesn't list** keeps the role for as long as the pawn
   is carrying it. Put it away and the loadout's first takes over — SS ignores a role pointing
   at a weapon the pawn hasn't got, and would otherwise fall back to picking by raw DPS.
@@ -55,9 +58,10 @@ Two things outrank the loadout, both because they are explicit:
   equivalent, so without this the projection would put a cleared default ranged weapon back
   within the minute. Set a role again and the loadout resumes managing it.
 
-Player intent is read from the gizmo as it happens, never inferred afterwards from a missing
-memory: SS drops memories on its own — every equip forgets the outgoing primary — so absence
-means nothing on its own.
+Player intent is read inside the sidearm gizmo's own interaction, never inferred afterwards
+from a missing memory: SS drops memories on its own — every equip forgets the outgoing
+primary — so absence means nothing by itself. Anything the gizmo does while the player is
+clicking is theirs; everything else is not.
 
 A declared weapon is remembered once the pawn actually **has** one, not when the row is added.
 The row already makes CE fetch it, and guessing a material before it arrives would send SS
@@ -65,9 +69,24 @@ hunting a specific stuff the loadout never asked for.
 
 **Forget a declared weapon in SS's gizmo and it stays forgotten** — that is how you say *carry
 this but don't wield it*, which removing the loadout row cannot express (that would stop the
-pawn carrying it at all). Put it back in the list and the loadout manages it again.
+pawn carrying it at all). The game will not arm the pawn with it on its own: CE's inventory
+picks and its loadout equip jobs are refused, and Simple Sidearms' own switching —
+idle re-arm, the melee swap when an enemy closes — skips it too. CE still hauls it for the
+loadout row exactly as before. To undo it: equip the weapon yourself — from the map
+right-click menu, the inventory tab, or the caravan gear tab — click it back into the
+sidearm list in SS's gizmo (or force it, while drafted), or remove and re-add its loadout
+row; any of those puts it back under loadout management immediately. Exclusions belong
+to the loadout assignment: assigning a different loadout (or losing the current one)
+clears them all, along with any hand-cleared roles — they are per-assignment rules, not
+permanent flags, and they do not come back when the old loadout does. While one is
+active, the weapon shows in Simple Sidearms' gizmo as an unmemorised entry — carried,
+demoted out of the sidearm list — and clicking it there puts it back, like any other
+unmemorised weapon.
 
-Generic slots ("any ranged weapon") are ignored: there is no specific def to remember.
+Generic slots ("any ranged weapon") are ignored — there is no specific def to remember —
+and so are CE's modular weapon platforms, whose attachments cannot be captured in the
+def-plus-material pair Simple Sidearms remembers by. Both stay in the loadout and are
+hauled as normal; they just are not projected into the sidearm list.
 
 **Ammo for your sidearms is Combat Extended's job.** Add the ammo to the loadout and CE keeps
 the pawn stocked to that count — the same mechanism it uses for everything else, visible in
@@ -77,9 +96,18 @@ Ad-hoc means *this pawn's primary is not in the loadout — keep it and feed it*
 it for declared sidearms both changed CE's drop behaviour for anyone who wanted sidearm ammo
 and forced ammo demand on anyone who wanted ad-hoc for its real purpose.
 
+**Multiplayer is untested.** The player-gesture tracking runs on UI interaction scopes; how
+those behave under RimWorld Multiplayer's synchronisation has not been verified.
+
+**What this does not enforce.** Simple Sidearms has settings limiting how many sidearms a
+pawn may carry and how heavy each may be relative to them. Those govern what a pawn picks up
+*on their own*; a loadout row is an explicit order, so a declared weapon is claimed
+regardless. Weapons the pawn cannot use at all — bonded or biocoded to someone else, banned
+by an ideoligion role, or any weapon on a pawn who cannot do violence — are still skipped.
+
 ## Building
 
-Same pattern as the compat patch: `dotnet build Source/CESidearmsSupply/CESidearmsSupply.csproj -c Release`.
+Same pattern as the compat patch: `dotnet build Source/CESimpleSidearmsCompat.Loadouts/CESimpleSidearmsCompat.Loadouts.csproj -c Release`.
 References the CE and SS workshop DLLs (`-p:RimWorldWorkshopDir=...` to override). The
 compatibility patch is a runtime dependency but not a build one — this module binds to no
 type in it. CI cannot build this repo; releases are manual.
