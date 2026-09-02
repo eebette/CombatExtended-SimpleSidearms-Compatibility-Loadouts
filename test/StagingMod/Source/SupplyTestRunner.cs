@@ -2796,6 +2796,47 @@ namespace CESupplyTestStaging
                 }
             });
 
+            // Save back-compat: the session GameComponent has been renamed twice
+            // (SupplyGameComponent -> SupplySessionComponent -> LoadoutsSessionComponent).
+            // A save written under an older name stores <li Class="<old>">, which
+            // ScribeExtractor resolves through BackCompatibility.GetBackCompatibleType;
+            // unmapped, it falls back to the abstract GameComponent and the load THROWS
+            // "Can't load abstract class". No save is needed to pin this — call the
+            // patched resolver directly and assert every retired name binds to the live
+            // component. (Verified in play against the TACT/CETEST/QUAL/Autosave saves,
+            // which carry the retired node; SUPPLY-1 does not.)
+            phases.Add(new Phase
+            {
+                label = "an-old-saves-renamed-game-component-still-binds",
+                deadlineTicks = 2000,
+                mutate = () => { },
+                checks =
+                {
+                    C("retired-component-names-map-to-the-live-class", () =>
+                    {
+                        string[] retired =
+                        {
+                            "CESidearmsSupply.SupplyGameComponent",
+                            "CESidearmsSupply.SupplySessionComponent",
+                        };
+                        var bad = new List<string>();
+                        foreach (string name in retired)
+                        {
+                            Type mapped = BackCompatibility.GetBackCompatibleType(
+                                typeof(GameComponent), name, null);
+                            if (mapped != typeof(CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent))
+                            {
+                                bad.Add($"{name} -> {mapped?.FullName ?? "null"}");
+                            }
+                        }
+                        return (bad.Count == 0,
+                                bad.Count == 0
+                                    ? "all retired GameComponent names bind to LoadoutsSessionComponent"
+                                    : "UNMAPPED: " + string.Join(", ", bad));
+                    }),
+                }
+            });
+
             // Round-5 High: the SS-funnel ban had a CurJob.playerForced exemption — and
             // vanilla stamps that flag on EVERY right-click order, attacks included, while
             // no player equip gesture ever reaches the funnel at all. So the ban switched

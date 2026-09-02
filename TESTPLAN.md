@@ -210,6 +210,35 @@ not a test.
   sidearms" before uninstalling clears them.
 - Dev log: no red errors from [CE+SS Loadouts]; any [CE+SS Loadouts] Log.ErrorOnce is a failure.
 
+## Save back-compat — the GameComponent renames (2026-09-02)
+
+The session GameComponent has shipped under three class names as the working
+title was retired: `CESidearmsSupply.SupplyGameComponent` →
+`CESidearmsSupply.SupplySessionComponent` →
+`CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent`. GameComponents are
+scribed as `<li Class="...">` and resolved by that string, so a save written
+under an older version could not resolve the type, fell back to the abstract
+`Verse.GameComponent`, and THREW "Can't load abstract class" — a blocking load
+error (accepted as unreleased at the rename; surfaced loudly once the RimBridge
+harness started gating on it). `Patches/SaveBackCompat.cs` postfixes
+`BackCompatibility.GetBackCompatibleType`, mapping every retired name to the
+live component. No data migration: `LoadoutsSessionComponent` scribes nothing
+persistent, and the projection reconciles from live state on load.
+
+- Pinned by `an-old-saves-renamed-game-component-still-binds` (supply1) — a
+  self-contained check that calls the patched resolver on each retired name and
+  asserts it returns `LoadoutsSessionComponent`. No save needed. A/B'd: neuter
+  the map and the pin goes red (`... -> null`). Verified in play via RimBridge
+  against TACT-1 (SupplyGameComponent) and Autosave-1 (SupplySessionComponent) —
+  both load with zero could-not-find-class errors and zero abstract-class
+  throws; SUPPLY-1 itself does not carry the retired node.
+- Only GameComponents need this. The ThingComp (`CompLoadoutSidearms`) was
+  renamed too, but comps are recreated from their ThingDef, not resolved from
+  the saved `Class` string, so a comp rename never raises could-not-find-class.
+- Distinct from the UNINSTALL note above (the current class orphaning when the
+  mod is absent): that cannot be back-compat'd — the type is simply gone — and
+  stays a documented one-line orphan.
+
 ## Combined-config phases (compat #42 import, 2026-08-30)
 
 Three phases pin behaviors that exist only with BOTH mods enabled — the normal
