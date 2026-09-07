@@ -10,11 +10,11 @@ namespace CESupplyTestStaging
     {
         /// <summary>
         /// Dumps the pawn's loadout slot stream: raw slots vs the full GetSlotsFor
-        /// output (which includes CE's ad-hoc virtuals and Sidearms&Supply's derived
+        /// output (which includes CE's ad-hoc virtuals and the Loadouts module's derived
         /// slots). The difference IS the derivation — direct verification of ammo
         /// sustainment and refetch without waiting for fetch jobs.
         /// </summary>
-        [DebugAction("Sidearms&Supply", "Log loadout slot stream", actionType = DebugActionType.ToolMapForPawns, allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        [DebugAction("CE+SS Loadouts", "Log loadout slot stream", actionType = DebugActionType.ToolMapForPawns, allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static void LogSlotStream(Pawn pawn)
         {
             Loadout loadout = pawn.GetLoadout();

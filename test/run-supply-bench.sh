@@ -20,7 +20,7 @@ SAVEDATA="$COMPAT/test/SaveData"
 RESULT="$SAVEDATA/bench-results-$LABEL.json"
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-    dotnet build "$REPO/Source/CESidearmsSupply/CESidearmsSupply.csproj" -c Release
+    dotnet build "$REPO/Source/CESimpleSidearmsCompat.Loadouts/CESimpleSidearmsCompat.Loadouts.csproj" -c Release
     dotnet build "$REPO/test/StagingMod/Source/SupplyTestStaging.csproj" -c Release
 fi
 

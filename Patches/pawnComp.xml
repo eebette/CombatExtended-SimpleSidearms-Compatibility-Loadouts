@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Attaches the per-pawn record to every pawn ThingDef, the same way Simple
+  Sidearms attaches its own memory comp. The conditional handles defs that
+  already have a <comps> list and those that do not.
+-->
+<Patch>
+
+    <Operation Class="PatchOperationConditional">
+        <xpath>/Defs/ThingDef[thingClass="Pawn"]/comps</xpath>
+        <nomatch Class="PatchOperationAdd">
+            <xpath>/Defs/ThingDef[thingClass="Pawn"]</xpath>
+            <value>
+                <comps>
+                    <li Class="CESimpleSidearmsCompat.Loadouts.CompProperties_LoadoutSidearms"></li>
+                </comps>
+            </value>
+        </nomatch>
+        <match Class="PatchOperationAdd">
+            <xpath>/Defs/ThingDef[thingClass="Pawn"]/comps</xpath>
+            <value>
+                <li Class="CESimpleSidearmsCompat.Loadouts.CompProperties_LoadoutSidearms"></li>
+            </value>
+        </match>
+    </Operation>
+
+</Patch>

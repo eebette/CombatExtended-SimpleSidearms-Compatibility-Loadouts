@@ -4,14 +4,14 @@ Same no-CI reality as the core patch (see its
 [RELEASING.md](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch/blob/master/RELEASING.md)
 for the full rationale): compile references are the CE / Simple Sidearms /
 core-patch DLLs from local folders, none vendorable. Releases are manual local
-builds with `Assemblies/CESidearmsSupply.dll` committed.
+builds with `Assemblies/CESimpleSidearmsCompat.Loadouts.dll` committed.
 
 ## Release checklist
 
 1. **Build the core patch first** (this mod compiles against its DLL), then:
 
    ```bash
-   dotnet build Source/CESidearmsSupply/CESidearmsSupply.csproj -c Release
+   dotnet build Source/CESimpleSidearmsCompat.Loadouts/CESimpleSidearmsCompat.Loadouts.csproj -c Release
    ```
 
 2. **Automated test pass** (regenerate saves, then both scenarios):
