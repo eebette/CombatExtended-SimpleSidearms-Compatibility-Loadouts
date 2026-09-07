@@ -76,7 +76,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
         /// </summary>
         internal static bool ManagedPawn(Pawn pawn)
         {
-            if (pawn == null || !pawn.IsColonist || !LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
+            if (pawn == null || !pawn.IsColonist || !LoadoutsSessionComponent.Enabled)
             {
                 return false;
             }

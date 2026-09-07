@@ -69,7 +69,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                 // ends a job restarts the think tree synchronously), and a release running
                 // there had its own forgets recorded as player exclusions. It now runs from
                 // LoadoutsSessionComponent.FinalizeInit, once per load.
-                if (!LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
+                if (!LoadoutsSessionComponent.Enabled)
                 {
                     return;
                 }
@@ -100,7 +100,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
         {
             try
             {
-                if (__result == null || pawn == null || !LoadoutsMod.Settings.loadoutWeaponsAsSidearms)
+                if (__result == null || pawn == null || !LoadoutsSessionComponent.Enabled)
                 {
                     return;
                 }

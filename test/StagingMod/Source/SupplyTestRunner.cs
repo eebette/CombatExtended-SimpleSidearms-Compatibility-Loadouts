@@ -926,7 +926,6 @@ namespace CESupplyTestStaging
             bool takeFlagCleared = false;
             bool takeFlagKept = false;
             bool featureOffSweptThisColony = false;
-            bool featureOffArmedTheFlag = false;
 
             var phases = new List<Phase>();
 
@@ -2601,48 +2600,31 @@ namespace CESupplyTestStaging
                 }
             });
 
-            // The settings toggle is global; the sweep it triggers is per-colony. Turning
-            // the feature off must sweep the loaded colony AND arm releasePending so every
-            // other save is swept on its next load — the flag was previously armed only in
-            // the no-save-loaded branch, so a second colony kept its claims forever (and
-            // the compat patch's drop exemption pinned those weapons in inventories).
-            //
-            // A/B note: on a pre-fix tree this phase fails in mutate with a
-            // MissingMethodException (Release(bool) does not exist there), not on the
-            // armed-flag check itself. The verdict direction is still right — the old tree
-            // cannot arm the flag — but the A leg pins the signature, not the semantics.
+            // Per-colony toggle: turning the feature off must sweep THIS loaded colony's claims
+            // right away, or the compat patch's drop exemption pins those weapons in inventories
+            // with no way back. The setting is per-save now, so the loaded colony is the only one
+            // to clean — no cross-save flag to arm.
             phases.Add(new Phase
             {
-                label = "turning-the-feature-off-sweeps-this-colony-and-arms-the-rest",
+                label = "turning-the-feature-off-sweeps-this-colony",
                 deadlineTicks = 4000,
                 arrange = () => Baseline(dockie, loadout, sniper, shotgun, pistol, gladius),
                 mutate = () =>
                 {
                     var rec = CESimpleSidearmsCompat.Loadouts.CompLoadoutSidearms.For(dockie);
-                    var settings = CESimpleSidearmsCompat.Loadouts.LoadoutsMod.Settings;
-                    bool wasPending = settings.releasePending;
+                    var comp = Current.Game.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
                     featureOffHadClaims = rec != null && rec.claimed.Count > 0;
                     try
                     {
-                        settings.loadoutWeaponsAsSidearms = false;
+                        comp.loadoutWeaponsAsSidearms = false;
                         CESimpleSidearmsCompat.Loadouts.LoadoutsMod.Release(interactive: true);
                         featureOffSweptThisColony = rec != null && rec.claimed.Count == 0;
-                        featureOffArmedTheFlag = settings.releasePending;
                     }
                     finally
                     {
-                        // Mirror the settings window's re-enable path: turning the feature
-                        // back on clears the pending flag so the deferred sweep does not
-                        // fire on an enabled feature. Written to DISK, not just memory:
-                        // Release() persisted the flipped values via Settings.Write(), and
-                        // leaving them on disk poisoned every later game launch — the
-                        // feature booted off, phase 0 burned its whole deadline fetching
-                        // nothing, and the A/B legs judged a broken world.
-                        settings.loadoutWeaponsAsSidearms = true;
-                        // The staged default, NOT wasPending: a poisoned boot value would
-                        // self-perpetuate through the restore.
-                        settings.releasePending = false;
-                        settings.Write();
+                        // Re-enable for the rest of the run — per-colony, in-memory; no global
+                        // flag to reset and no disk write to poison later launches.
+                        comp.loadoutWeaponsAsSidearms = true;
                     }
                     ForceReconcile(dockie);
                 },
@@ -2655,10 +2637,6 @@ namespace CESupplyTestStaging
                     C("this-colony-was-swept", () =>
                     {
                         return (featureOffSweptThisColony, $"swept={featureOffSweptThisColony}");
-                    }),
-                    C("the-flag-was-armed-for-every-other-save", () =>
-                    {
-                        return (featureOffArmedTheFlag, $"releasePending={featureOffArmedTheFlag}");
                     }),
                 }
             });
