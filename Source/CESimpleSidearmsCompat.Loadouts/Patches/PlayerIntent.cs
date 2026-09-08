@@ -64,20 +64,6 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             rec?.SyncAssignment(pawn);
             return rec;
         }
-
-        /// <summary>
-        /// Require CompSidearmMemory methods.
-        /// </summary>
-        internal static bool Require(string method, Type[] args, string consequence)
-        {
-            if (AccessTools.Method(typeof(CompSidearmMemory), method, args) != null)
-            {
-                return true;
-            }
-            Log.Error($"[CE+SS Loadouts] CompSidearmMemory.{method} not found — {consequence} "
-                      + "Simple Sidearms probably moved it.");
-            return false;
-        }
     }
 
     /// <summary>
@@ -112,7 +98,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                   new[] { typeof(ThingDefStuffDefPair) })]
     public static class CompSidearmMemory_ForgetSidearmMemory_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("ForgetSidearmMemory",
+        public static bool Prepare() => PatchGuard.Require("ForgetSidearmMemory",
             new[] { typeof(ThingDefStuffDefPair) }, "taking a loadout weapon out of the sidearm list by hand will not stick.");
 
         [HarmonyPostfix]
@@ -147,7 +133,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                   new[] { typeof(Thing) })]
     public static class CompSidearmMemory_InformOfAddedSidearm_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("InformOfAddedSidearm",
+        public static bool Prepare() => PatchGuard.Require("InformOfAddedSidearm",
             new[] { typeof(Thing) }, "putting a weapon back in the sidearm list by hand will not resume management.");
 
         [HarmonyPostfix]
@@ -170,7 +156,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetRangedWeaponDefault), new Type[0])]
     public static class CompSidearmMemory_UnsetRangedWeaponDefault_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("UnsetRangedWeaponDefault",
+        public static bool Prepare() => PatchGuard.Require("UnsetRangedWeaponDefault",
             Type.EmptyTypes, "clearing the default ranged weapon by hand will be undone by the next reconcile.");
 
         [HarmonyPostfix]
@@ -194,7 +180,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
     [HarmonyPatch(typeof(CompSidearmMemory), nameof(CompSidearmMemory.UnsetMeleeWeaponPreference), new Type[0])]
     public static class CompSidearmMemory_UnsetMeleeWeaponPreference_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("UnsetMeleeWeaponPreference",
+        public static bool Prepare() => PatchGuard.Require("UnsetMeleeWeaponPreference",
             Type.EmptyTypes, "clearing the preferred melee weapon by hand will be undone by the next reconcile.");
 
         [HarmonyPrefix]
@@ -224,7 +210,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                   new[] { typeof(ThingDefStuffDefPair) })]
     public static class CompSidearmMemory_SetRangedWeaponTypeAsDefault_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("SetRangedWeaponTypeAsDefault",
+        public static bool Prepare() => PatchGuard.Require("SetRangedWeaponTypeAsDefault",
             new[] { typeof(ThingDefStuffDefPair) }, "setting the default ranged weapon by hand will not resume loadout management.");
 
         [HarmonyPostfix]
@@ -246,7 +232,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                   new[] { typeof(ThingDefStuffDefPair) })]
     public static class CompSidearmMemory_SetMeleeWeaponTypeAsPreferred_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("SetMeleeWeaponTypeAsPreferred",
+        public static bool Prepare() => PatchGuard.Require("SetMeleeWeaponTypeAsPreferred",
             new[] { typeof(ThingDefStuffDefPair) }, "setting the preferred melee weapon by hand will not resume loadout management.");
 
         [HarmonyPostfix]
@@ -331,7 +317,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                   new[] { typeof(ThingDefStuffDefPair), typeof(bool) })]
     public static class CompSidearmMemory_SetWeaponAsForced_Patch
     {
-        public static bool Prepare() => PlayerIntent.Require("SetWeaponAsForced",
+        public static bool Prepare() => PatchGuard.Require("SetWeaponAsForced",
             new[] { typeof(ThingDefStuffDefPair), typeof(bool) },
             "forcing an excluded weapon while drafted will not withdraw its exclusion.");
 
