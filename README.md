@@ -8,7 +8,7 @@ RimWorld mod that syncs [Combat Extended](https://github.com/CombatExtended-Cont
 loadouts and [Simple Sidearms](https://github.com/PeteTimesSix/SimpleSidearms). Builds on (and requires) the
 [CE + Simple Sidearms Compatibility patch](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch).
 
-## Features (each toggleable in mod settings)
+## Features
 
 * Weapons in a pawn's Loadout will be added to Simple Sidearms sidearm memory (as if equipped using _Equip as sidearm_).
 * The first firearm in the Loadout will be added as primary firearm, and the first melee weapon will be added as the
