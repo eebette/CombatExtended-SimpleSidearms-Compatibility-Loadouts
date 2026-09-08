@@ -397,6 +397,9 @@ namespace CESupplyTestStaging
                     check.lastDetail = "EXCEPTION: " + e.Message;
                     if (!check.informational)
                     {
+                        // A throw is not a pass — overwrite the prior poll's value, or a check
+                        // that later throws still reports passed inside a failed phase.
+                        check.passed = false;
                         allPass = false;
                         if (check.precondition)
                         {
@@ -404,6 +407,10 @@ namespace CESupplyTestStaging
                             // the phase must report VOID (tested nothing), not FAIL
                             // (blaming the product for a broken setup).
                             preconditionsHold = false;
+                        }
+                        else if (check.negative)
+                        {
+                            tripped = check;
                         }
                     }
                 }

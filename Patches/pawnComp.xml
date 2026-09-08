@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!--
-  Attaches the per-pawn record to every pawn ThingDef, the same way Simple
-  Sidearms attaches its own memory comp. The conditional handles defs that
-  already have a <comps> list and those that do not.
+  Attaches the per-pawn record to the Pawn base def, the same way Simple
+  Sidearms attaches its own memory comp. PatchOperationConditional tests once,
+  document-wide: BasePawn always has a <comps> list, so the match branch runs
+  and nomatch is a dead safety net; child pawn defs inherit the comp.
 -->
 <Patch>
 
