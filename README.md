@@ -14,8 +14,8 @@ loadouts and [Simple Sidearms](https://github.com/PeteTimesSix/SimpleSidearms). 
 * The first firearm in the Loadout will be added as primary firearm, and the first melee weapon will be added as the
   pawn's primary melee weapon.
 * Removing a weapon from a pawn's Loadout will automatically forget that weapon from the pawn's SS memory.
-* A pawn's loadout will periodically reconcile with the Simple Sidearms memory to ensure they're sync'ed. 
-* Primary weapon can be overridden for non-Loadout weapons by simply Equipping them. 
+* A pawn's loadout will periodically reconcile with the Simple Sidearms memory to ensure they're synced. 
+* Primary weapon can be overridden for non-Loadout weapons by manually equipping. 
 
 ## Load order
 
