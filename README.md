@@ -76,6 +76,20 @@ Same pattern as the compat patch:
 CE and SS workshop DLLs (`-p:RimWorldWorkshopDir=...` to override). The compatibility patch is a runtime dependency but
 not a build one — this module binds to no type in it. CI cannot build this repo; releases are manual.
 
+## Testing
+
+Automated in-game acceptance tests, run with Combat Extended, Simple Sidearms, and the compatibility patch loaded:
+
+```bash
+./test/run-supply-assert.sh supply1 SUPPLY-1-loadout-sidearms
+```
+
+`supply1` drives the full loadout-as-sidearm cycle across many phases: loadout weapons remembered as sidearms
+(first ranged the default, first melee the preferred), removing one forgetting it, the "carry but do not wield"
+exclusions and their withdrawal, and the per-colony toggle releasing claims when switched off. It writes
+`test/SaveData/test-results-supply1.json`; `run-supply-isolated.sh` runs every phase against a fresh save. Details and
+recorded passes: [`TESTPLAN.md`](TESTPLAN.md).
+
 ## License
 
 [MIT](LICENSE) - code, build files, and docs.
