@@ -41,7 +41,7 @@ in these instead.
 | Mod                                                                                                                                     | What it does                                                                                                                    |
 |-----------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
 | [![Better Attack Orders for Simple Sidearms](Media/Badge_BAO.png)](https://github.com/eebette/Better-Attack-Orders-for-Simple-Sidearms) | Adds sidearm attack orders to the right-click target menu.                                                                      |
-| [![Loadout Quality for Combat Extended](Media/Badge_LQ.png)](https://github.com/eebette/Loadout-Quality-for-Combat-Extended)            | Pawns will upgrade their held guns when a higher-quality copy is available.                                                     |
+| [![Pawns Optimize Weapon Quality](Media/Badge_POWQ.png)](https://github.com/eebette/Pawns-Optimize-Weapon-Quality)            | Pawns will upgrade their held guns when a higher-quality copy is available.                                                     |
 | [![Universal Patch for More Materials](Media/Badge_UPMM.png)](https://github.com/eebette/Universal-Patch-for-More-Materials)            | Adds materials from [More Materials](https://steamcommunity.com/sharedfiles/filedetails/?id=3055040889) to non-vanilla recipes. |
 
 ## FAQ
