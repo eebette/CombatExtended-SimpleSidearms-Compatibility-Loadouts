@@ -33,16 +33,16 @@ in these instead.
 
 | Module                                                                                                                                             | What it does                                                         |
 |----------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|
-| [![CE + Simple Sidearms Compatibility Patch](Media/Badge_Patch.png)](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch) | Core compatibility patch for Combat Extended and Simple Sidearms.    |
-| [![Compatibility Module - Tactics](Media/Badge_Tactics.png)](https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Tactics)       | Sensible tweaks to nonsense pawn behavior when CE + SS run together. |
+| <a href="https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Patch"><img src="Media/Badge_Patch.png" width="300" alt="CE + Simple Sidearms Compatibility Patch"></a> | Core compatibility patch for Combat Extended and Simple Sidearms.    |
+| <a href="https://github.com/eebette/CombatExtended-SimpleSidearms-Compatibility-Tactics"><img src="Media/Badge_Tactics.png" width="300" alt="Compatibility Module - Tactics"></a>       | Sensible tweaks to nonsense pawn behavior when CE + SS run together. |
 
 ### Standalone
 
 | Mod                                                                                                                                     | What it does                                                                                                                    |
 |-----------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| [![Better Attack Orders for Simple Sidearms](Media/Badge_BAO.png)](https://github.com/eebette/Better-Attack-Orders-for-Simple-Sidearms) | Adds sidearm attack orders to the right-click target menu.                                                                      |
-| [![Pawns Optimize Weapon Quality](Media/Badge_POWQ.png)](https://github.com/eebette/Pawns-Optimize-Weapon-Quality)            | Pawns will upgrade their held guns when a higher-quality copy is available.                                                     |
-| [![Universal Patch for More Materials](Media/Badge_UPMM.png)](https://github.com/eebette/Universal-Patch-for-More-Materials)            | Adds materials from [More Materials](https://steamcommunity.com/sharedfiles/filedetails/?id=3055040889) to non-vanilla recipes. |
+| <a href="https://github.com/eebette/Better-Attack-Orders-for-Simple-Sidearms"><img src="Media/Badge_BAO.png" width="300" alt="Better Attack Orders for Simple Sidearms"></a> | Adds sidearm attack orders to the right-click target menu.                                                                      |
+| <a href="https://github.com/eebette/Pawns-Optimize-Weapon-Quality"><img src="Media/Badge_POWQ.png" width="300" alt="Pawns Optimize Weapon Quality"></a>            | Pawns will upgrade their held guns when a higher-quality copy is available.                                                     |
+| <a href="https://github.com/eebette/Universal-Patch-for-More-Materials"><img src="Media/Badge_UPMM.png" width="300" alt="Universal Patch for More Materials"></a>            | Adds materials from [More Materials](https://steamcommunity.com/sharedfiles/filedetails/?id=3055040889) to non-vanilla recipes. |
 
 ## FAQ
 
