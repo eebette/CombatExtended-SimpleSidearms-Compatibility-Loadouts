@@ -717,12 +717,13 @@ namespace CESupplyTestStaging
             return phases;
         }
 
-        // -- SUPPLY-3: dropping the index-0 pick reconciles the loadout weapon back to primary --
+        // -- SUPPLY-3: dropping the index-0 pick re-arms the pawn with its carried loadout weapon --
         //
-        // Follows supply2: the player hand-equips a non-loadout gun (index-0 pick), then DROPS it.
-        // The marker must clear (pawn no longer holds it) so CE re-equips the loadout weapon as
-        // primary instead of leaving it a sidearm behind an empty hand. Observable pin: after the
-        // drop, CE's loadout job is Equip(sniper) - GREEN - not TakeCountToInventory - RED.
+        // Faithful: the loadout weapon is already CARRIED AS A SIDEARM (from supply2), not fetched
+        // fresh. CE counts the loadout satisfied by possession, so it will NOT re-equip a carried
+        // loadout weapon - the pawn is left unarmed. The reconcile must promote it back into the
+        // primary slot. Pin: after the drop + reconcile, primary == sniper (RED before the re-arm).
+        // DIAG confirms SS's equip-from-inventory is the lever.
         private List<Phase> BuildSupply3()
         {
             Pawn dockie = Colonist("Dockie");
@@ -730,17 +731,18 @@ namespace CESupplyTestStaging
             ThingDef grabbed = D("Gun_AssaultRifle");
             Loadout loadout = dockie.GetLoadout();
 
-            bool equippedAR = false, arDropped = false;
-            string ceJobDef = "unsampled", ceJobTarget = "-";
+            bool equippedAR = false, arDropped = false, sniperCarried = false;
+            ThingDef primaryAfterReconcile = null;
 
             var phases = new List<Phase>();
             phases.Add(new Phase
             {
-                label = "drop-pick-reconciles-loadout-weapon",
+                label = "drop-pick-rearms-loadout-weapon",
                 deadlineTicks = 3000,
                 minTicks = 30,
                 arrange = () =>
                 {
+                    // Pawn carries the sniper (remembered sidearm); it is NOT stripped this time.
                     Baseline(dockie, loadout, sniper);
                     loadout.adHoc = false;
                     var comp = Current.Game?.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
@@ -752,30 +754,42 @@ namespace CESupplyTestStaging
                     {
                         Mem(dockie).ForgetSidearmMemory(pair);
                     }
-                    // Pawn lacks its loadout weapon (as in supply2); leave a sniper on the map to fetch.
-                    foreach (var w in dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
-                                 .Where(w => w.def == sniper).ToList())
-                    {
-                        if (dockie.equipment?.Primary == w)
-                        {
-                            dockie.equipment.Remove(w);
-                        }
-                        else
-                        {
-                            dockie.inventory.innerContainer.Remove(w);
-                        }
-                        w.Destroy();
-                    }
-                    var mapSniper = (ThingWithComps)ThingMaker.MakeThing(sniper,
-                        sniper.MadeFromStuff ? GenStuff.DefaultStuffFor(sniper) : null);
-                    GenSpawn.Spawn(mapSniper, dockie.Position + new IntVec3(2, 0, 0), dockie.Map);
-                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
                 },
                 mutate = () =>
                 {
+                    // Establish the real pre-drop state deterministically, right before the act, so
+                    // no think-tree tick can intervene: the natural JobGiver re-arm (the fix, working)
+                    // fires between arrange and here and can leave the sniper as primary or - after a
+                    // later MakeRoomFor - grounded. Undo it: sniper back to inventory as a carried
+                    // sidearm, primary empty, then hand-equip the non-loadout AR over the empty slot.
+                    if (dockie.equipment?.Primary != null)
+                    {
+                        ThingWithComps cur = dockie.equipment.Primary;
+                        dockie.equipment.Remove(cur);
+                        if (cur.def == sniper)
+                        {
+                            dockie.inventory.innerContainer.TryAdd(cur, canMergeWithExistingStacks: true);
+                        }
+                        else
+                        {
+                            cur.Destroy();
+                        }
+                    }
+                    if (!dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper))
+                    {
+                        var snip = (ThingWithComps)ThingMaker.MakeThing(sniper,
+                            sniper.MadeFromStuff ? GenStuff.DefaultStuffFor(sniper) : null);
+                        dockie.inventory.innerContainer.TryAdd(snip, canMergeWithExistingStacks: true);
+                        if (!Mem(dockie).RememberedWeapons.Contains(snip.toThingDefStuffDefPair()))
+                        {
+                            Mem(dockie).RememberedWeapons.Add(snip.toThingDefStuffDefPair());
+                        }
+                    }
+                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+
                     var ar = (ThingWithComps)ThingMaker.MakeThing(grabbed,
                         grabbed.MadeFromStuff ? GenStuff.DefaultStuffFor(grabbed) : null);
-                    // Hand-equip AR (sets the index-0 pick), exactly as supply2.
+                    // Hand-equip AR (index-0 pick); the sniper stays a carried sidearm.
                     PeteTimesSix.SimpleSidearms.Intercepts.JobDriver_Equip_MakeNewToils_Patches
                         .JustBeforeEquip(dockie, ar);
                     dockie.equipment.MakeRoomFor(ar);
@@ -797,24 +811,14 @@ namespace CESupplyTestStaging
                         }
                     }
                     equippedAR = dockie.equipment?.Primary?.def == grabbed;
-                    // The player's manual drop.
-                    dockie.equipment.TryDropEquipment(ar, out _, dockie.Position, forbid: false);
-                    arDropped = dockie.equipment?.Primary == null
-                                && !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true).Any(w => w == ar);
-                    // What does CE's loadout job-giver want now? (its Reconcile prefix clears the stale marker)
-                    try
-                    {
-                        var jg = new CombatExtended.JobGiver_UpdateLoadout();
-                        var m = AccessTools.Method(typeof(CombatExtended.JobGiver_UpdateLoadout), "TryGiveJob",
-                            new[] { typeof(Pawn) });
-                        var ceJob = m?.Invoke(jg, new object[] { dockie }) as Verse.AI.Job;
-                        ceJobDef = ceJob?.def?.defName ?? "null";
-                        ceJobTarget = ceJob?.targetA.Thing?.def?.defName ?? "-";
-                    }
-                    catch (Exception e)
-                    {
-                        ceJobDef = "ERR:" + (e.InnerException?.Message ?? e.Message);
-                    }
+                    sniperCarried = dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper);
+                    // The player's SS-gizmo right-click drop: DropSidearm to the GROUND + unmemorise,
+                    // inside the gizmo scope so our ForgetSidearmMemory patch fires (PlayerIsDriving).
+                    InGizmo(() => WeaponAssingment.DropSidearm(dockie, ar, intentionalDrop: true, unmemorise: true));
+                    arDropped = dockie.equipment?.Primary == null && ar.Spawned;
+                    // Reconcile: clears the marker and (with the fix) re-arms the loadout weapon.
+                    CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(dockie);
+                    primaryAfterReconcile = dockie.equipment?.Primary?.def;
                 },
                 checks =
                 {
@@ -823,11 +827,11 @@ namespace CESupplyTestStaging
                         (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
                     P("sniper-in-loadout", () =>
                         (loadout.Slots.Any(s => s.thingDef == sniper), "loadout lists the gun")),
-                    C("pick-equipped-then-dropped", () =>
-                        (equippedAR && arDropped, "equipped=" + equippedAR + " dropped=" + arDropped)),
-                    C("loadout-weapon-reconciled-to-primary", () =>
-                        (ceJobDef == "Equip" && ceJobTarget == sniper.defName,
-                         "ceJob=" + ceJobDef + " target=" + ceJobTarget)),
+                    C("pick-equipped-dropped-sniper-carried", () =>
+                        (equippedAR && arDropped && sniperCarried,
+                         "eq=" + equippedAR + " drop=" + arDropped + " sniperCarried=" + sniperCarried)),
+                    C("reconcile-rearms-loadout-weapon", () =>
+                        (primaryAfterReconcile == sniper, "primaryAfterReconcile=" + (primaryAfterReconcile?.defName ?? "null"))),
                 },
             });
             return phases;

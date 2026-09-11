@@ -172,6 +172,28 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
 
             Apply(memory, rec, target, forced, forcedDrafted);
             AssertRoles(pawn, memory, rec, declared, target, forced);
+
+            // Left unarmed but still carrying a loadout weapon? Re-equip it. This is the case where
+            // the player dropped a hand-equipped pick via the SS gizmo: CE counts the loadout
+            // satisfied by mere possession and won't re-equip a carried loadout weapon, and SS's
+            // by-preference re-arm follows the pawn's skill preference (melee for a low-Shooting
+            // pawn), so neither promotes a carried ranged loadout weapon. Equip the first declared
+            // loadout weapon the pawn carries, specifically.
+            if (pawn.equipment?.Primary == null && !memory.ForcedUnarmed
+                && pawn.IsValidSidearmsCarrierRightNow())
+            {
+                foreach (ThingDef def in declared)
+                {
+                    ThingWithComps carried = pawn.GetCarriedWeapons(includeEquipped: false, includeTools: false)
+                        .FirstOrDefault(w => w.def == def && !rec.dontEquip.Contains(w.toThingDefStuffDefPair()));
+                    if (carried != null)
+                    {
+                        WeaponAssingment.equipSpecificWeaponFromInventory(pawn, carried,
+                            dropCurrent: false, intentionalDrop: false);
+                        break;
+                    }
+                }
+            }
         }
 
         /// <summary>
