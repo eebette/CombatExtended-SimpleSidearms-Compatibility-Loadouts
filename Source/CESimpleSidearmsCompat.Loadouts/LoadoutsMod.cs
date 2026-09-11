@@ -56,9 +56,6 @@ namespace CESimpleSidearmsCompat.Loadouts
                 Release(interactive: true);
             }
 
-            listing.Gap();
-            listing.Label("Ammo for sidearms is Combat Extended's own job: add the ammo to the loadout and "
-                          + "CE keeps the pawn stocked to that count, the same as for any other item.");
             listing.End();
         }
 
