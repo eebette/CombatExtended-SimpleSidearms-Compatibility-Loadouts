@@ -591,6 +591,7 @@ namespace CESupplyTestStaging
             {
                 case "supply1": return BuildSupply1();
                 case "supply2": return BuildSupply2();
+                case "supply3": return BuildSupply3();
                 default: throw new InvalidOperationException("Unknown scenario: " + name);
             }
         }
@@ -711,6 +712,122 @@ namespace CESupplyTestStaging
                         (ceJobDef == "TakeCountToInventory" && ceJobTarget == sniper.defName,
                          "ceJob=" + ceJobDef + " target=" + ceJobTarget)),
                     C("DIAG-remember", () => (true, "rememberedAtEquip=" + rememberedAtEquip), true),
+                },
+            });
+            return phases;
+        }
+
+        // -- SUPPLY-3: dropping the index-0 pick reconciles the loadout weapon back to primary --
+        //
+        // Follows supply2: the player hand-equips a non-loadout gun (index-0 pick), then DROPS it.
+        // The marker must clear (pawn no longer holds it) so CE re-equips the loadout weapon as
+        // primary instead of leaving it a sidearm behind an empty hand. Observable pin: after the
+        // drop, CE's loadout job is Equip(sniper) - GREEN - not TakeCountToInventory - RED.
+        private List<Phase> BuildSupply3()
+        {
+            Pawn dockie = Colonist("Dockie");
+            ThingDef sniper = D("Gun_SniperRifle");
+            ThingDef grabbed = D("Gun_AssaultRifle");
+            Loadout loadout = dockie.GetLoadout();
+
+            bool equippedAR = false, arDropped = false;
+            string ceJobDef = "unsampled", ceJobTarget = "-";
+
+            var phases = new List<Phase>();
+            phases.Add(new Phase
+            {
+                label = "drop-pick-reconciles-loadout-weapon",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper);
+                    loadout.adHoc = false;
+                    var comp = Current.Game?.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
+                    if (comp != null)
+                    {
+                        comp.loadoutWeaponsAsSidearms = true;
+                    }
+                    foreach (var pair in Mem(dockie).RememberedWeapons.Where(p => p.thing == grabbed).ToList())
+                    {
+                        Mem(dockie).ForgetSidearmMemory(pair);
+                    }
+                    // Pawn lacks its loadout weapon (as in supply2); leave a sniper on the map to fetch.
+                    foreach (var w in dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                                 .Where(w => w.def == sniper).ToList())
+                    {
+                        if (dockie.equipment?.Primary == w)
+                        {
+                            dockie.equipment.Remove(w);
+                        }
+                        else
+                        {
+                            dockie.inventory.innerContainer.Remove(w);
+                        }
+                        w.Destroy();
+                    }
+                    var mapSniper = (ThingWithComps)ThingMaker.MakeThing(sniper,
+                        sniper.MadeFromStuff ? GenStuff.DefaultStuffFor(sniper) : null);
+                    GenSpawn.Spawn(mapSniper, dockie.Position + new IntVec3(2, 0, 0), dockie.Map);
+                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                },
+                mutate = () =>
+                {
+                    var ar = (ThingWithComps)ThingMaker.MakeThing(grabbed,
+                        grabbed.MadeFromStuff ? GenStuff.DefaultStuffFor(grabbed) : null);
+                    // Hand-equip AR (sets the index-0 pick), exactly as supply2.
+                    PeteTimesSix.SimpleSidearms.Intercepts.JobDriver_Equip_MakeNewToils_Patches
+                        .JustBeforeEquip(dockie, ar);
+                    dockie.equipment.MakeRoomFor(ar);
+                    Verse.AI.Job saved = dockie.jobs?.curJob;
+                    Verse.AI.Job eq = new Verse.AI.Job(JobDefOf.Equip, ar) { playerForced = true };
+                    if (dockie.jobs != null)
+                    {
+                        dockie.jobs.curJob = eq;
+                    }
+                    try
+                    {
+                        dockie.equipment.AddEquipment(ar);
+                    }
+                    finally
+                    {
+                        if (dockie.jobs != null)
+                        {
+                            dockie.jobs.curJob = saved;
+                        }
+                    }
+                    equippedAR = dockie.equipment?.Primary?.def == grabbed;
+                    // The player's manual drop.
+                    dockie.equipment.TryDropEquipment(ar, out _, dockie.Position, forbid: false);
+                    arDropped = dockie.equipment?.Primary == null
+                                && !dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true).Any(w => w == ar);
+                    // What does CE's loadout job-giver want now? (its Reconcile prefix clears the stale marker)
+                    try
+                    {
+                        var jg = new CombatExtended.JobGiver_UpdateLoadout();
+                        var m = AccessTools.Method(typeof(CombatExtended.JobGiver_UpdateLoadout), "TryGiveJob",
+                            new[] { typeof(Pawn) });
+                        var ceJob = m?.Invoke(jg, new object[] { dockie }) as Verse.AI.Job;
+                        ceJobDef = ceJob?.def?.defName ?? "null";
+                        ceJobTarget = ceJob?.targetA.Thing?.def?.defName ?? "-";
+                    }
+                    catch (Exception e)
+                    {
+                        ceJobDef = "ERR:" + (e.InnerException?.Message ?? e.Message);
+                    }
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    P("sniper-in-loadout", () =>
+                        (loadout.Slots.Any(s => s.thingDef == sniper), "loadout lists the gun")),
+                    C("pick-equipped-then-dropped", () =>
+                        (equippedAR && arDropped, "equipped=" + equippedAR + " dropped=" + arDropped)),
+                    C("loadout-weapon-reconciled-to-primary", () =>
+                        (ceJobDef == "Equip" && ceJobTarget == sniper.defName,
+                         "ceJob=" + ceJobDef + " target=" + ceJobTarget)),
                 },
             });
             return phases;

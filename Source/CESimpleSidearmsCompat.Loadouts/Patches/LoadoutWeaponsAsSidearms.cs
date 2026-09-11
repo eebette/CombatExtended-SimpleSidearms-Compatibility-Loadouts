@@ -138,6 +138,16 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             // Clear exclusions/vetoes on assignment change.
             rec.SyncAssignment(pawn);
 
+            // The index-0 pick is only in effect while the pawn still holds it. If the player
+            // dropped it, clear the marker so the loadout weapon reconciles back into the primary
+            // slot instead of staying a sidearm behind an empty hand.
+            if (rec.playerPrimary != null
+                && !pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                        .Any(w => w.toThingDefStuffDefPair() == rec.playerPrimary.Value))
+            {
+                rec.playerPrimary = null;
+            }
+
             if (loadout == null || loadout.defaultLoadout)
             {
                 if (rec.claimed.Count > 0)
