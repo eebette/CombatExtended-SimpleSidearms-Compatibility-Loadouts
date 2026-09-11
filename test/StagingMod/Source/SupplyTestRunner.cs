@@ -717,13 +717,16 @@ namespace CESupplyTestStaging
             return phases;
         }
 
-        // -- SUPPLY-3: dropping the index-0 pick re-arms the pawn with its carried loadout weapon --
-        //
-        // Faithful: the loadout weapon is already CARRIED AS A SIDEARM (from supply2), not fetched
-        // fresh. CE counts the loadout satisfied by possession, so it will NOT re-equip a carried
-        // loadout weapon - the pawn is left unarmed. The reconcile must promote it back into the
-        // primary slot. Pin: after the drop + reconcile, primary == sniper (RED before the re-arm).
-        // DIAG confirms SS's equip-from-inventory is the lever.
+        // -- SUPPLY-3: dropping the hand-equipped non-loadout primary re-arms the carried loadout
+        //    weapon. Faithful: the loadout weapon is already CARRIED AS A SIDEARM (from supply2),
+        //    not fetched fresh - CE counts the loadout satisfied by possession and won't re-equip a
+        //    carried weapon, and SS's by-preference re-arm picks melee for a low-Shooting pawn, so
+        //    neither promotes it. Two triggers, one phase each:
+        //      1. gizmo-drop postfix (WeaponAssingment_DropSidearm_Patch) - fires WHILE DRAFTED,
+        //         closing the reconcile's gap (CE's JobGiver_UpdateLoadout runs only in the
+        //         non-drafted tree, so the reconcile alone leaves a drafted pawn unarmed).
+        //      2. reconcile safety net (Reconcile -> TryReArmFromLoadout) - the idle/non-gesture
+        //         path, reached here without a gizmo drop so it is isolated from trigger 1.
         private List<Phase> BuildSupply3()
         {
             Pawn dockie = Colonist("Dockie");
@@ -731,94 +734,155 @@ namespace CESupplyTestStaging
             ThingDef grabbed = D("Gun_AssaultRifle");
             Loadout loadout = dockie.GetLoadout();
 
-            bool equippedAR = false, arDropped = false, sniperCarried = false;
-            ThingDef primaryAfterReconcile = null;
+            // Real pre-drop state: primary empty, the sniper a carried + remembered loadout sidearm.
+            // Undoes any natural re-arm WITHOUT going through DropSidearm, so it never fires the
+            // gizmo-drop postfix - only the trigger a phase means to exercise acts.
+            Action seedCarriedSniper = () =>
+            {
+                if (dockie.equipment?.Primary != null)
+                {
+                    ThingWithComps cur = dockie.equipment.Primary;
+                    dockie.equipment.Remove(cur);
+                    if (cur.def == sniper)
+                    {
+                        dockie.inventory.innerContainer.TryAdd(cur, canMergeWithExistingStacks: true);
+                    }
+                    else
+                    {
+                        cur.Destroy();
+                    }
+                }
+                if (!dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper))
+                {
+                    var snip = (ThingWithComps)ThingMaker.MakeThing(sniper,
+                        sniper.MadeFromStuff ? GenStuff.DefaultStuffFor(sniper) : null);
+                    dockie.inventory.innerContainer.TryAdd(snip, canMergeWithExistingStacks: true);
+                }
+                foreach (ThingWithComps s in dockie.inventory.innerContainer.OfType<ThingWithComps>()
+                             .Where(w => w.def == sniper).ToList())
+                {
+                    if (!Mem(dockie).RememberedWeapons.Contains(s.toThingDefStuffDefPair()))
+                    {
+                        Mem(dockie).RememberedWeapons.Add(s.toThingDefStuffDefPair());
+                    }
+                }
+                dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+            };
+
+            // Hand-equip the non-loadout AR over the (empty) primary slot through SS's real equip
+            // intercept, as a player right-click "Equip" would (playerForced Equip job for the
+            // AddEquipment recorder). Returns the AR instance.
+            Func<ThingWithComps> handEquipAR = () =>
+            {
+                var ar = (ThingWithComps)ThingMaker.MakeThing(grabbed,
+                    grabbed.MadeFromStuff ? GenStuff.DefaultStuffFor(grabbed) : null);
+                PeteTimesSix.SimpleSidearms.Intercepts.JobDriver_Equip_MakeNewToils_Patches
+                    .JustBeforeEquip(dockie, ar);
+                dockie.equipment.MakeRoomFor(ar);
+                Verse.AI.Job saved = dockie.jobs?.curJob;
+                if (dockie.jobs != null)
+                {
+                    dockie.jobs.curJob = new Verse.AI.Job(JobDefOf.Equip, ar) { playerForced = true };
+                }
+                try
+                {
+                    dockie.equipment.AddEquipment(ar);
+                }
+                finally
+                {
+                    if (dockie.jobs != null)
+                    {
+                        dockie.jobs.curJob = saved;
+                    }
+                }
+                return ar;
+            };
+
+            Action<Loadout> enableFeature = lo =>
+            {
+                lo.adHoc = false;
+                var comp = Current.Game?.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
+                if (comp != null)
+                {
+                    comp.loadoutWeaponsAsSidearms = true;
+                }
+                foreach (var pair in Mem(dockie).RememberedWeapons.Where(p => p.thing == grabbed).ToList())
+                {
+                    Mem(dockie).ForgetSidearmMemory(pair);
+                }
+            };
 
             var phases = new List<Phase>();
+
+            // -- Phase 1: the gizmo drop re-arms the carried loadout weapon WHILE DRAFTED. --
+            bool p1Equipped = false, p1SniperCarried = false, p1ArGrounded = false;
+            ThingDef p1PrimaryAfterDrop = null;
             phases.Add(new Phase
             {
-                label = "drop-pick-rearms-loadout-weapon",
+                label = "gizmo-drop-rearms-while-drafted",
                 deadlineTicks = 3000,
                 minTicks = 30,
                 arrange = () =>
                 {
-                    // Pawn carries the sniper (remembered sidearm); it is NOT stripped this time.
                     Baseline(dockie, loadout, sniper);
-                    loadout.adHoc = false;
-                    var comp = Current.Game?.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
-                    if (comp != null)
+                    enableFeature(loadout);
+                    // The whole point of this phase: a DRAFTED pawn. CE's JobGiver_UpdateLoadout is
+                    // in the non-drafted tree, so only the gizmo-drop postfix can re-arm here.
+                    if (dockie.drafter != null)
                     {
-                        comp.loadoutWeaponsAsSidearms = true;
-                    }
-                    foreach (var pair in Mem(dockie).RememberedWeapons.Where(p => p.thing == grabbed).ToList())
-                    {
-                        Mem(dockie).ForgetSidearmMemory(pair);
+                        dockie.drafter.Drafted = true;
                     }
                 },
                 mutate = () =>
                 {
-                    // Establish the real pre-drop state deterministically, right before the act, so
-                    // no think-tree tick can intervene: the natural JobGiver re-arm (the fix, working)
-                    // fires between arrange and here and can leave the sniper as primary or - after a
-                    // later MakeRoomFor - grounded. Undo it: sniper back to inventory as a carried
-                    // sidearm, primary empty, then hand-equip the non-loadout AR over the empty slot.
-                    if (dockie.equipment?.Primary != null)
-                    {
-                        ThingWithComps cur = dockie.equipment.Primary;
-                        dockie.equipment.Remove(cur);
-                        if (cur.def == sniper)
-                        {
-                            dockie.inventory.innerContainer.TryAdd(cur, canMergeWithExistingStacks: true);
-                        }
-                        else
-                        {
-                            cur.Destroy();
-                        }
-                    }
-                    if (!dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper))
-                    {
-                        var snip = (ThingWithComps)ThingMaker.MakeThing(sniper,
-                            sniper.MadeFromStuff ? GenStuff.DefaultStuffFor(sniper) : null);
-                        dockie.inventory.innerContainer.TryAdd(snip, canMergeWithExistingStacks: true);
-                        if (!Mem(dockie).RememberedWeapons.Contains(snip.toThingDefStuffDefPair()))
-                        {
-                            Mem(dockie).RememberedWeapons.Add(snip.toThingDefStuffDefPair());
-                        }
-                    }
-                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
-
-                    var ar = (ThingWithComps)ThingMaker.MakeThing(grabbed,
-                        grabbed.MadeFromStuff ? GenStuff.DefaultStuffFor(grabbed) : null);
-                    // Hand-equip AR (index-0 pick); the sniper stays a carried sidearm.
-                    PeteTimesSix.SimpleSidearms.Intercepts.JobDriver_Equip_MakeNewToils_Patches
-                        .JustBeforeEquip(dockie, ar);
-                    dockie.equipment.MakeRoomFor(ar);
-                    Verse.AI.Job saved = dockie.jobs?.curJob;
-                    Verse.AI.Job eq = new Verse.AI.Job(JobDefOf.Equip, ar) { playerForced = true };
-                    if (dockie.jobs != null)
-                    {
-                        dockie.jobs.curJob = eq;
-                    }
-                    try
-                    {
-                        dockie.equipment.AddEquipment(ar);
-                    }
-                    finally
-                    {
-                        if (dockie.jobs != null)
-                        {
-                            dockie.jobs.curJob = saved;
-                        }
-                    }
-                    equippedAR = dockie.equipment?.Primary?.def == grabbed;
-                    sniperCarried = dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper);
-                    // The player's SS-gizmo right-click drop: DropSidearm to the GROUND + unmemorise,
-                    // inside the gizmo scope so our ForgetSidearmMemory patch fires (PlayerIsDriving).
+                    seedCarriedSniper();
+                    ThingWithComps ar = handEquipAR();
+                    p1Equipped = dockie.equipment?.Primary?.def == grabbed;
+                    p1SniperCarried = dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper);
+                    // Player's SS-gizmo right-click drop of the primary: the postfix re-arms in-scope.
                     InGizmo(() => WeaponAssingment.DropSidearm(dockie, ar, intentionalDrop: true, unmemorise: true));
-                    arDropped = dockie.equipment?.Primary == null && ar.Spawned;
-                    // Reconcile: clears the marker and (with the fix) re-arms the loadout weapon.
+                    p1PrimaryAfterDrop = dockie.equipment?.Primary?.def;
+                    p1ArGrounded = ar.Spawned && dockie.equipment?.Primary?.def != grabbed;
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("pawn-drafted", () => (dockie.Drafted, "drafted=" + dockie.Drafted)),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    P("sniper-in-loadout", () =>
+                        (loadout.Slots.Any(s => s.thingDef == sniper), "loadout lists the gun")),
+                    C("pick-equipped-sniper-carried", () =>
+                        (p1Equipped && p1SniperCarried, "eq=" + p1Equipped + " sniperCarried=" + p1SniperCarried)),
+                    C("gizmo-drop-grounds-ar", () =>
+                        (p1ArGrounded, "arGrounded=" + p1ArGrounded)),
+                    C("gizmo-drop-rearms-sniper", () =>
+                        (p1PrimaryAfterDrop == sniper, "primaryAfterDrop=" + (p1PrimaryAfterDrop?.defName ?? "null"))),
+                },
+            });
+
+            // -- Phase 2: the reconcile safety net re-arms an idle pawn (no gizmo drop). --
+            bool p2UnarmedCarrying = false;
+            ThingDef p2PrimaryAfterReconcile = null;
+            phases.Add(new Phase
+            {
+                label = "reconcile-rearms-when-idle",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper);   // leaves the pawn undrafted
+                    enableFeature(loadout);
+                },
+                mutate = () =>
+                {
+                    // Unarmed + carrying the sniper, reached WITHOUT DropSidearm so only the reconcile
+                    // can re-arm (isolates the safety-net trigger from the gizmo-drop postfix).
+                    seedCarriedSniper();
+                    p2UnarmedCarrying = dockie.equipment?.Primary == null
+                        && dockie.inventory.innerContainer.OfType<ThingWithComps>().Any(w => w.def == sniper);
                     CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(dockie);
-                    primaryAfterReconcile = dockie.equipment?.Primary?.def;
+                    p2PrimaryAfterReconcile = dockie.equipment?.Primary?.def;
                 },
                 checks =
                 {
@@ -827,11 +891,10 @@ namespace CESupplyTestStaging
                         (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
                     P("sniper-in-loadout", () =>
                         (loadout.Slots.Any(s => s.thingDef == sniper), "loadout lists the gun")),
-                    C("pick-equipped-dropped-sniper-carried", () =>
-                        (equippedAR && arDropped && sniperCarried,
-                         "eq=" + equippedAR + " drop=" + arDropped + " sniperCarried=" + sniperCarried)),
-                    C("reconcile-rearms-loadout-weapon", () =>
-                        (primaryAfterReconcile == sniper, "primaryAfterReconcile=" + (primaryAfterReconcile?.defName ?? "null"))),
+                    C("setup-unarmed-carrying", () =>
+                        (p2UnarmedCarrying, "unarmedCarrying=" + p2UnarmedCarrying)),
+                    C("reconcile-rearms-sniper", () =>
+                        (p2PrimaryAfterReconcile == sniper, "primaryAfterReconcile=" + (p2PrimaryAfterReconcile?.defName ?? "null"))),
                 },
             });
             return phases;

@@ -173,27 +173,59 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             Apply(memory, rec, target, forced, forcedDrafted);
             AssertRoles(pawn, memory, rec, declared, target, forced);
 
-            // Left unarmed but still carrying a loadout weapon? Re-equip it. This is the case where
-            // the player dropped a hand-equipped pick via the SS gizmo: CE counts the loadout
-            // satisfied by mere possession and won't re-equip a carried loadout weapon, and SS's
-            // by-preference re-arm follows the pawn's skill preference (melee for a low-Shooting
-            // pawn), so neither promotes a carried ranged loadout weapon. Equip the first declared
-            // loadout weapon the pawn carries, specifically.
-            if (pawn.equipment?.Primary == null && !memory.ForcedUnarmed
-                && pawn.IsValidSidearmsCarrierRightNow())
+            // Left unarmed but still carrying a loadout weapon? Re-arm it. The idle safety net for
+            // the non-gesture causes (a save loaded in that state, another mod's drop, a cleared
+            // force); the gizmo-drop postfix (WeaponAssingment_DropSidearm_Patch) covers the
+            // immediate, drafted case, since this reconcile only runs in the non-drafted tree.
+            TryReArmFromLoadout(pawn);
+        }
+
+        /// <summary>
+        /// Unarmed but still carrying a loadout weapon it remembers as a sidearm? Equip the
+        /// highest loadout-order such weapon. CE counts the loadout satisfied by mere possession
+        /// and won't re-equip a carried weapon, and SS's by-preference re-arm follows the pawn's
+        /// skill preference (melee for a low-Shooting pawn), so neither promotes a carried ranged
+        /// loadout weapon. Shared by the reconcile (idle safety net) and the gizmo-drop postfix
+        /// (immediate, drafted included).
+        /// </summary>
+        public static bool TryReArmFromLoadout(Pawn pawn)
+        {
+            if (pawn == null || pawn.Dead || !pawn.IsColonist || pawn.equipment?.Primary != null)
             {
-                foreach (ThingDef def in declared)
+                return false;
+            }
+            CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
+            CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
+            if (memory == null || rec == null || memory.ForcedUnarmed
+                || !pawn.IsValidSidearmsCarrierRightNow())
+            {
+                return false;
+            }
+            Loadout loadout = pawn.GetLoadout();
+            if (loadout == null || loadout.defaultLoadout)
+            {
+                return false;
+            }
+            rec.SyncAssignment(pawn);
+            foreach (LoadoutSlot slot in loadout.Slots)
+            {
+                ThingDef def = slot?.thingDef;
+                if (def == null || !def.IsWeapon || slot.isWeaponPlatform)
                 {
-                    ThingWithComps carried = pawn.GetCarriedWeapons(includeEquipped: false, includeTools: false)
-                        .FirstOrDefault(w => w.def == def && !rec.dontEquip.Contains(w.toThingDefStuffDefPair()));
-                    if (carried != null)
-                    {
-                        WeaponAssingment.equipSpecificWeaponFromInventory(pawn, carried,
-                            dropCurrent: false, intentionalDrop: false);
-                        break;
-                    }
+                    continue;
+                }
+                ThingWithComps carried = pawn.GetCarriedWeapons(includeEquipped: false, includeTools: false)
+                    .FirstOrDefault(w => w.def == def
+                        && !rec.dontEquip.Contains(w.toThingDefStuffDefPair())
+                        && memory.RememberedWeapons.Contains(w.toThingDefStuffDefPair()));
+                if (carried != null)
+                {
+                    WeaponAssingment.equipSpecificWeaponFromInventory(pawn, carried,
+                        dropCurrent: false, intentionalDrop: false);
+                    return true;
                 }
             }
+            return false;
         }
 
         /// <summary>
@@ -404,6 +436,52 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                    && !declared.Contains(role.Value.thing) && pawn.hasWeaponType(role.Value);
         }
 
+    }
+
+    /// <summary>
+    /// Re-arm on a player gizmo-drop of the primary. Simple Sidearms' drop runs in every think
+    /// tree, drafted included, so this closes the reconcile's gap: CE's JobGiver_UpdateLoadout
+    /// (the reconcile's trigger) lives in the non-drafted colonist tree, so without this a pawn
+    /// who drops its hand-equipped primary while drafted stands unarmed until undrafted.
+    /// </summary>
+    [HarmonyPatch(typeof(WeaponAssingment), nameof(WeaponAssingment.DropSidearm),
+                  new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) })]
+    public static class WeaponAssingment_DropSidearm_Patch
+    {
+        public static bool Prepare()
+        {
+            if (AccessTools.Method(typeof(WeaponAssingment), nameof(WeaponAssingment.DropSidearm),
+                    new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) }) != null)
+            {
+                return true;
+            }
+            Log.Error("[Sidearms&Supply] WeaponAssingment.DropSidearm not found — dropping a "
+                      + "hand-equipped primary via the sidearm gizmo will not re-arm the carried "
+                      + "loadout weapon while drafted. Simple Sidearms probably moved it.");
+            return false;
+        }
+
+        // Postfix: the drop has happened. Only the gizmo interaction (PlayerIsDriving) that emptied
+        // the primary slot - i.e. the dropped weapon WAS the primary - on a managed pawn re-arms; a
+        // non-primary sidearm drop leaves the primary intact and the guard below skips it.
+        [HarmonyPostfix]
+        public static void Postfix(Pawn pawn, bool intentionalDrop)
+        {
+            try
+            {
+                if (!PlayerIntent.PlayerIsDriving || !intentionalDrop
+                    || pawn?.equipment?.Primary != null || !PlayerIntent.ManagedPawn(pawn))
+                {
+                    return;
+                }
+                JobGiver_UpdateLoadout_TryGiveJob_Patch.TryReArmFromLoadout(pawn);
+            }
+            catch (Exception e)
+            {
+                Log.ErrorOnce($"[Sidearms&Supply] Drop re-arm failed for {pawn}: {e}",
+                              0x53535234 ^ (pawn?.thingIDNumber ?? 0) ^ e.GetType().Name.GetHashCode());
+            }
+        }
     }
 
     /// <summary>
