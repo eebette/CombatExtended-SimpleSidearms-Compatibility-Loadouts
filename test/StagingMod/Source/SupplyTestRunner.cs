@@ -590,8 +590,130 @@ namespace CESupplyTestStaging
             switch (name)
             {
                 case "supply1": return BuildSupply1();
+                case "supply2": return BuildSupply2();
                 default: throw new InvalidOperationException("Unknown scenario: " + name);
             }
+        }
+
+        // -- SUPPLY-2: dead-man's-gun grab rides as a sidearm; the loadout weapon does not steal the slot --
+        //
+        // Loadout lists a gun the pawn lacks. The player hand-equips a different gun (the index-0
+        // pick). CE then wants to Equip the loadout gun as primary, which would displace the grab.
+        // The list-model fix converts that into a carry: the loadout gun is fetched as a SIDEARM and
+        // the grab stays primary. Observable pin (compiles against baseline too): CE's next loadout
+        // job is Equip(sniper) - RED - before the fix, TakeCountToInventory(sniper) - GREEN - after.
+        private List<Phase> BuildSupply2()
+        {
+            Pawn dockie = Colonist("Dockie");
+            ThingDef sniper = D("Gun_SniperRifle");
+            ThingDef grabbed = D("Gun_AssaultRifle");
+            Loadout loadout = dockie.GetLoadout();
+
+            bool rememberedAtEquip = false;
+            string ceJobDef = "unsampled", ceJobTarget = "-";
+            ThingDef primaryAfter = null;
+
+            var phases = new List<Phase>();
+            phases.Add(new Phase
+            {
+                label = "grab-rides-as-sidearm",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () =>
+                {
+                    Baseline(dockie, loadout, sniper);
+                    loadout.adHoc = false;
+                    var comp = Current.Game?.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
+                    if (comp != null)
+                    {
+                        comp.loadoutWeaponsAsSidearms = true;
+                    }
+                    foreach (var pair in Mem(dockie).RememberedWeapons.Where(p => p.thing == grabbed).ToList())
+                    {
+                        Mem(dockie).ForgetSidearmMemory(pair);
+                    }
+                    // The pawn must LACK its loadout weapon so CE wants to fetch+equip it. Strip the
+                    // sniper the Baseline gave it and leave one on the map to fetch.
+                    foreach (var w in dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true)
+                                 .Where(w => w.def == sniper).ToList())
+                    {
+                        if (dockie.equipment?.Primary == w)
+                        {
+                            dockie.equipment.Remove(w);
+                        }
+                        else
+                        {
+                            dockie.inventory.innerContainer.Remove(w);
+                        }
+                        w.Destroy();
+                    }
+                    var mapSniper = (ThingWithComps)ThingMaker.MakeThing(sniper,
+                        sniper.MadeFromStuff ? GenStuff.DefaultStuffFor(sniper) : null);
+                    GenSpawn.Spawn(mapSniper, dockie.Position + new IntVec3(2, 0, 0), dockie.Map);
+                    dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                },
+                mutate = () =>
+                {
+                    var ar = (ThingWithComps)ThingMaker.MakeThing(grabbed,
+                        grabbed.MadeFromStuff ? GenStuff.DefaultStuffFor(grabbed) : null);
+                    // Faithful hand-equip: SS remembers the primary (its JobDriver_Equip toil), and
+                    // our AddEquipment hook marks it the index-0 pick under a playerForced Equip.
+                    PeteTimesSix.SimpleSidearms.Intercepts.JobDriver_Equip_MakeNewToils_Patches
+                        .JustBeforeEquip(dockie, ar);
+                    dockie.equipment.MakeRoomFor(ar);
+                    Verse.AI.Job saved = dockie.jobs?.curJob;
+                    Verse.AI.Job eq = new Verse.AI.Job(JobDefOf.Equip, ar) { playerForced = true };
+                    if (dockie.jobs != null)
+                    {
+                        dockie.jobs.curJob = eq;
+                    }
+                    try
+                    {
+                        dockie.equipment.AddEquipment(ar);
+                    }
+                    finally
+                    {
+                        if (dockie.jobs != null)
+                        {
+                            dockie.jobs.curJob = saved;
+                        }
+                    }
+                    rememberedAtEquip = Mem(dockie).RememberedWeapons.Any(p => p.thing == grabbed);
+                    primaryAfter = dockie.equipment?.Primary?.def;
+                    // What does CE's loadout job-giver want now? (runs our reconcile + postfix)
+                    try
+                    {
+                        var jg = new CombatExtended.JobGiver_UpdateLoadout();
+                        var m = AccessTools.Method(typeof(CombatExtended.JobGiver_UpdateLoadout), "TryGiveJob",
+                            new[] { typeof(Pawn) });
+                        var ceJob = m?.Invoke(jg, new object[] { dockie }) as Verse.AI.Job;
+                        ceJobDef = ceJob?.def?.defName ?? "null";
+                        ceJobTarget = ceJob?.targetA.Thing?.def?.defName ?? "-";
+                    }
+                    catch (Exception e)
+                    {
+                        ceJobDef = "ERR:" + (e.InnerException?.Message ?? e.Message);
+                    }
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    P("sniper-in-loadout", () =>
+                        (loadout.Slots.Any(s => s.thingDef == sniper), "loadout lists the gun")),
+                    P("pawn-lacks-sniper", () =>
+                        (!dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true).Any(w => w.def == sniper),
+                         "no sniper held")),
+                    C("grab-is-primary", () =>
+                        (primaryAfter == grabbed, "primary=" + (primaryAfter?.defName ?? "-"))),
+                    C("loadout-weapon-fetched-as-sidearm-not-primary", () =>
+                        (ceJobDef == "TakeCountToInventory" && ceJobTarget == sniper.defName,
+                         "ceJob=" + ceJobDef + " target=" + ceJobTarget)),
+                    C("DIAG-remember", () => (true, "rememberedAtEquip=" + rememberedAtEquip), true),
+                },
+            });
+            return phases;
         }
 
         // -- shared helpers --

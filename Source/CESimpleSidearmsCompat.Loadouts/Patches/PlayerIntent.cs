@@ -696,6 +696,10 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             Verse.AI.Job curJob = pawn.CurJob;
             bool playerContext = PlayerIntent.PlayerChoosing
                 || (!pawn.Spawned && RimWorld.Planet.CaravanUtility.GetCaravan(pawn) != null)
+                // A hand-issued map "Equip" order (right-click a weapon on the ground) is player
+                // intent too: it runs as a playerForced JobDefOf.Equip with no choice-surface scope.
+                // Equip is a Core def, always present.
+                || (curJob != null && curJob.def == JobDefOf.Equip && curJob.playerForced)
                 // The def is DLC content and its DefOf field is null without it so the def
                 // must be checked first or this dereferences a null CurJob inside every
                 // think-tree equip.
@@ -707,20 +711,34 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             }
             CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
             rec?.SyncAssignment(pawn);
-            if (rec == null || !rec.dontEquip.Remove(new ThingDefStuffDefPair(newEq.def, newEq.Stuff)))
+            if (rec == null)
             {
                 return;
             }
-            if (newEq.def.IsRangedWeapon)
+            // Withdraw a prior exclusion + role veto when the player re-equips something they had
+            // excluded. A no-op for a weapon that was never excluded (must not early-return here, or
+            // the index-0 tracking and remember below are skipped for a fresh hand-grab).
+            if (rec.dontEquip.Remove(new ThingDefStuffDefPair(newEq.def, newEq.Stuff)))
             {
-                rec.rangedRoleVetoed = false;
+                if (newEq.def.IsRangedWeapon)
+                {
+                    rec.rangedRoleVetoed = false;
+                }
+                if (newEq.def.IsMeleeWeapon)
+                {
+                    rec.meleeRoleVetoed = false;
+                }
             }
-            if (newEq.def.IsMeleeWeapon)
-            {
-                rec.meleeRoleVetoed = false;
-            }
+            // The list's index-0 pick: a hand-equipped non-loadout weapon becomes the player
+            // primary, so CE's loadout weapons ride along as sidearms rather than retaking the slot
+            // (see JobGiver_UpdateLoadout_TryGiveJob_Patch). Equipping a loadout weapon hands the
+            // slot back to the loadout.
+            Loadout lo = pawn.GetLoadout();
+            bool isLoadoutWeapon = lo != null && !lo.defaultLoadout
+                && lo.Slots.Any(s => s.thingDef == newEq.def);
+            rec.playerPrimary = isLoadoutWeapon ? (ThingDefStuffDefPair?)null : newEq.toThingDefStuffDefPair();
+            // Remember the hand-equipped weapon so the reconcile keeps it as a carried sidearm.
             CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);
-            // Guard InformOfAddedPrimary on RememberedWeapons to avoid dupes.
             if (memory != null && !memory.RememberedWeapons.Any(p => p == newEq.toThingDefStuffDefPair()))
             {
                 memory.InformOfAddedPrimary(newEq);

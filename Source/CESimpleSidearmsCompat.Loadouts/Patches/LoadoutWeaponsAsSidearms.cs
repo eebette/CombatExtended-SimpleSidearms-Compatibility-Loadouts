@@ -76,11 +76,21 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                 }
                 CompLoadoutSidearms rec = CompLoadoutSidearms.For(pawn);
                 rec?.SyncAssignment(pawn);
-                if (rec == null || rec.dontEquip.Count == 0
+                if (rec == null || !PlayerIntent.ManagedPawn(pawn)
                     || !(__result.GetTarget(TargetIndex.A).Thing is ThingWithComps weapon)
-                    || weapon.def == null
-                    || !rec.dontEquip.Contains(weapon.toThingDefStuffDefPair())
-                    || !PlayerIntent.ManagedPawn(pawn))
+                    || weapon.def == null)
+                {
+                    return;
+                }
+                bool excluded = rec.dontEquip.Contains(weapon.toThingDefStuffDefPair());
+                // The player holds a hand-equipped index-0 primary: don't let CE retake the primary
+                // slot by equipping a loadout weapon the pawn lacks - fetch it as a sidearm instead,
+                // so the grabbed gun stays primary and the loadout weapon rides along (the list model).
+                Loadout lo = pawn.GetLoadout();
+                bool displacesPlayerPrimary = rec.playerPrimary != null
+                    && lo != null && !lo.defaultLoadout
+                    && lo.Slots.Any(s => s.thingDef == weapon.def);
+                if (!excluded && !displacesPlayerPrimary)
                 {
                     return;
                 }

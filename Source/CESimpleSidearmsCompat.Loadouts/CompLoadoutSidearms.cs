@@ -30,6 +30,14 @@ namespace CESimpleSidearmsCompat.Loadouts
         public List<ThingDefStuffDefPair> dontEquip = new List<ThingDefStuffDefPair>();
 
         /// <summary>
+        /// The player's hand-equipped primary that is not a loadout weapon - the list's index-0
+        /// pick. While set, a loadout weapon the pawn lacks is fetched as a sidearm instead of
+        /// retaking the primary slot. Cleared when the player equips a loadout weapon (hands the
+        /// slot back to the loadout) or the loadout assignment changes.
+        /// </summary>
+        public ThingDefStuffDefPair? playerPrimary;
+
+        /// <summary>
         /// Weapons whose roles the player cleared by hand.
         /// </summary>
         public bool rangedRoleVetoed;
@@ -53,6 +61,7 @@ namespace CESimpleSidearmsCompat.Loadouts
             if (lastLoadoutId != id)
             {
                 dontEquip.Clear();
+                playerPrimary = null;
                 rangedRoleVetoed = false;
                 meleeRoleVetoed = false;
                 lastLoadoutId = id;
@@ -84,6 +93,7 @@ namespace CESimpleSidearmsCompat.Loadouts
             base.PostExposeData();
             Scribe_Collections.Look(ref claimed, "cessLoadouts_claimed", LookMode.Deep);
             Scribe_Collections.Look(ref dontEquip, "cessLoadouts_dontEquip", LookMode.Deep);
+            Scribe_Deep.Look(ref playerPrimary, "cessLoadouts_playerPrimary");
             Scribe_Values.Look(ref rangedRoleVetoed, "cessLoadouts_rangedRoleVetoed", false);
             Scribe_Values.Look(ref meleeRoleVetoed, "cessLoadouts_meleeRoleVetoed", false);
             Scribe_Values.Look(ref lastLoadoutId, "cessLoadouts_lastLoadoutId", -1);
