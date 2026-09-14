@@ -138,9 +138,8 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             // Clear exclusions/vetoes on assignment change.
             rec.SyncAssignment(pawn);
 
-            // The index-0 pick is only in effect while the pawn still holds it. If the player
-            // dropped it, clear the marker so the loadout weapon reconciles back into the primary
-            // slot instead of staying a sidearm behind an empty hand.
+            // If the player dropped index-0 pick, clear the marker so the loadout weapon
+            // reconciles back into the primary slot.
             if (rec.playerPrimary != null
                 && !pawn.GetCarriedWeapons(includeEquipped: true, includeTools: true)
                         .Any(w => w.toThingDefStuffDefPair() == rec.playerPrimary.Value))
@@ -173,20 +172,12 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             Apply(memory, rec, target, forced, forcedDrafted);
             AssertRoles(pawn, memory, rec, declared, target, forced);
 
-            // Left unarmed but still carrying a loadout weapon? Re-arm it. The idle safety net for
-            // the non-gesture causes (a save loaded in that state, another mod's drop, a cleared
-            // force); the gizmo-drop postfix (WeaponAssingment_DropSidearm_Patch) covers the
-            // immediate, drafted case, since this reconcile only runs in the non-drafted tree.
+            // Re-arm a carried loadout weapon if unarmed.
             TryReArmFromLoadout(pawn);
         }
 
         /// <summary>
-        /// Unarmed but still carrying a loadout weapon it remembers as a sidearm? Equip the
-        /// highest loadout-order such weapon. CE counts the loadout satisfied by mere possession
-        /// and won't re-equip a carried weapon, and SS's by-preference re-arm follows the pawn's
-        /// skill preference (melee for a low-Shooting pawn), so neither promotes a carried ranged
-        /// loadout weapon. Shared by the reconcile (idle safety net) and the gizmo-drop postfix
-        /// (immediate, drafted included).
+        /// Equip the highest loadout-order weapon if still carrying a loadout sidearm.
         /// </summary>
         public static bool TryReArmFromLoadout(Pawn pawn)
         {
@@ -439,10 +430,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
     }
 
     /// <summary>
-    /// Re-arm on a player gizmo-drop of the primary. Simple Sidearms' drop runs in every think
-    /// tree, drafted included, so this closes the reconcile's gap: CE's JobGiver_UpdateLoadout
-    /// (the reconcile's trigger) lives in the non-drafted colonist tree, so without this a pawn
-    /// who drops its hand-equipped primary while drafted stands unarmed until undrafted.
+    /// Re-arm on a player gizmo-drop of the primary.
     /// </summary>
     [HarmonyPatch(typeof(WeaponAssingment), nameof(WeaponAssingment.DropSidearm),
                   new[] { typeof(Pawn), typeof(ThingWithComps), typeof(bool), typeof(bool) })]
@@ -461,9 +449,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             return false;
         }
 
-        // Postfix: the drop has happened. Only the gizmo interaction (PlayerIsDriving) that emptied
-        // the primary slot - i.e. the dropped weapon WAS the primary - on a managed pawn re-arms; a
-        // non-primary sidearm drop leaves the primary intact and the guard below skips it.
+        // Gaurds against dropping a non-primary sidearm.
         [HarmonyPostfix]
         public static void Postfix(Pawn pawn, bool intentionalDrop)
         {
