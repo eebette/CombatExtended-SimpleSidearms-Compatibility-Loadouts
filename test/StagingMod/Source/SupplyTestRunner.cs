@@ -592,6 +592,7 @@ namespace CESupplyTestStaging
                 case "supply1": return BuildSupply1();
                 case "supply2": return BuildSupply2();
                 case "supply3": return BuildSupply3();
+                case "supply4": return BuildSupply4();
                 default: throw new InvalidOperationException("Unknown scenario: " + name);
             }
         }
@@ -898,6 +899,204 @@ namespace CESupplyTestStaging
                 },
             });
             return phases;
+        }
+
+        // -- SUPPLY-4: undrafted, the pawn gravitates back to its highest-priority USABLE loadout
+        //    gun. After a combat swap (pistol -> sniper) and undraft, the reconcile drifts the held
+        //    sniper back to the index-0 pistol - unless the pistol is dry, the sniper is forced, or
+        //    the held gun is a hand-equipped non-loadout primary (the list model). Every-tick, so it
+        //    also snaps a non-forced manual switch back.
+        private List<Phase> BuildSupply4()
+        {
+            Pawn dockie = Colonist("Dockie");
+            ThingDef pistol = D("Gun_Autopistol");   // index-0 loadout gun
+            ThingDef sniper = D("Gun_SniperRifle");  // lower-priority loadout gun
+            ThingDef nonLoadout = D("Gun_AssaultRifle");
+            Loadout loadout = dockie.GetLoadout();
+
+            Action enableFeature = () =>
+            {
+                loadout.adHoc = false;
+                var comp = Current.Game?.GetComponent<CESimpleSidearmsCompat.Loadouts.LoadoutsSessionComponent>();
+                if (comp != null)
+                {
+                    comp.loadoutWeaponsAsSidearms = true;
+                }
+            };
+            Func<ThingDef, ThingWithComps> carried = def =>
+                dockie.GetCarriedWeapons(includeEquipped: true, includeTools: true).FirstOrDefault(w => w.def == def);
+            // Set a carried gun's magazine so HasUsableAmmo is deterministic (full = usable, 0 = dry).
+            Action<ThingWithComps, bool> setMag = (gun, full) =>
+            {
+                var c = gun?.TryGetComp<CombatExtended.CompAmmoUser>();
+                if (c != null && c.UseAmmo)
+                {
+                    c.CurMagCount = full ? c.MagSize : 0;
+                }
+            };
+            Action equipSniperPrimary = () =>
+            {
+                ThingWithComps sn = carried(sniper);
+                if (sn != null && dockie.equipment?.Primary?.def != sniper)
+                {
+                    WeaponAssingment.equipSpecificWeaponFromInventory(dockie, sn, dropCurrent: false, intentionalDrop: false);
+                }
+            };
+
+            var phases = new List<Phase>();
+
+            // -- Phase 1: held sniper + usable index-0 pistol -> gravitate to the pistol. --
+            bool p1HeldSniper = false;
+            ThingDef p1PrimaryAfter = null;
+            phases.Add(new Phase
+            {
+                label = "gravitate-to-usable-index0",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () => { Baseline(dockie, loadout, pistol, sniper); enableFeature(); },
+                mutate = () =>
+                {
+                    setMag(carried(pistol), true);   // index-0 usable
+                    equipSniperPrimary();                  // simulate the combat swap
+                    p1HeldSniper = dockie.equipment?.Primary?.def == sniper;
+                    CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(dockie);
+                    p1PrimaryAfter = dockie.equipment?.Primary?.def;
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    P("both-in-loadout", () =>
+                        (loadout.Slots.Any(s => s.thingDef == pistol) && loadout.Slots.Any(s => s.thingDef == sniper), "loadout lists both")),
+                    C("held-was-sniper", () => (p1HeldSniper, "heldSniper=" + p1HeldSniper)),
+                    C("gravitated-to-pistol", () =>
+                        (p1PrimaryAfter == pistol, "primaryAfter=" + (p1PrimaryAfter?.defName ?? "null"))),
+                },
+            });
+
+            // -- Phase 2: sniper FORCED -> not switched (the player's explicit hold). --
+            ThingDef p2PrimaryAfter = null;
+            bool p2Forced = false;
+            phases.Add(new Phase
+            {
+                label = "forced-sniper-not-switched",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () => { Baseline(dockie, loadout, pistol, sniper); enableFeature(); },
+                mutate = () =>
+                {
+                    setMag(carried(pistol), true);
+                    equipSniperPrimary();
+                    Mem(dockie).SetWeaponAsForced(dockie.equipment.Primary.toThingDefStuffDefPair(), drafted: false);
+                    p2Forced = Mem(dockie).IsCurrentWeaponForced(alsoCountPreferredOrDefault: false);
+                    CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(dockie);
+                    p2PrimaryAfter = dockie.equipment?.Primary?.def;
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    C("sniper-is-forced", () => (p2Forced, "forced=" + p2Forced)),
+                    C("forced-stays-sniper", () =>
+                        (p2PrimaryAfter == sniper, "primaryAfter=" + (p2PrimaryAfter?.defName ?? "null"))),
+                },
+            });
+
+            // -- Phase 3: held a NON-loadout primary -> left alone (list model). --
+            bool p3HeldNonLoadout = false;
+            ThingDef p3PrimaryAfter = null;
+            phases.Add(new Phase
+            {
+                label = "nonloadout-primary-left-alone",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () => { Baseline(dockie, loadout, pistol, sniper); enableFeature(); },
+                mutate = () =>
+                {
+                    setMag(carried(pistol), true);   // pistol usable - would be gravitated to IF held were a loadout gun
+                    var ar = (ThingWithComps)ThingMaker.MakeThing(nonLoadout,
+                        nonLoadout.MadeFromStuff ? GenStuff.DefaultStuffFor(nonLoadout) : null);
+                    dockie.equipment.MakeRoomFor(ar);
+                    dockie.equipment.AddEquipment(ar);     // hand-equipped non-loadout primary
+                    p3HeldNonLoadout = dockie.equipment?.Primary?.def == nonLoadout;
+                    CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(dockie);
+                    p3PrimaryAfter = dockie.equipment?.Primary?.def;
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    C("held-was-nonloadout", () => (p3HeldNonLoadout, "heldNonLoadout=" + p3HeldNonLoadout)),
+                    C("nonloadout-stays", () =>
+                        (p3PrimaryAfter == nonLoadout, "primaryAfter=" + (p3PrimaryAfter?.defName ?? "null"))),
+                },
+            });
+
+            // -- Phase 4: a DRY index-0 gun is skipped (has-ammo gate). Loadout order [sniper, pistol]
+            //    so the sniper is index-0; drain it dry and hold the pistol -> no gravitation onto
+            //    the dead index-0. Sniper is used as index-0 because it definitely runs CE ammo.
+            bool p4Index0Dry = false, p4HeldPistol = false;
+            ThingDef p4PrimaryAfter = null;
+            phases.Add(new Phase
+            {
+                label = "dry-index0-not-switched",
+                deadlineTicks = 3000,
+                minTicks = 30,
+                arrange = () => { Baseline(dockie, loadout, sniper, pistol); enableFeature(); },
+                mutate = () =>
+                {
+                    // Drain the index-0 sniper: empty mag + strip its selected ammo -> unreloadable.
+                    ThingWithComps sn = carried(sniper);
+                    setMag(sn, false);
+                    var sc = sn?.TryGetComp<CombatExtended.CompAmmoUser>();
+                    if (sc?.SelectedAmmo != null)
+                    {
+                        foreach (Thing a in dockie.inventory.innerContainer
+                                     .Where(t => t.def == sc.SelectedAmmo).ToList())
+                        {
+                            dockie.inventory.innerContainer.Remove(a);
+                            a.Destroy();
+                        }
+                        dockie.TryGetComp<CombatExtended.CompInventory>()?.UpdateInventory();
+                    }
+                    p4Index0Dry = !HasUsableAmmoProbe(carried(sniper), dockie);
+                    // Hold the lower-priority pistol.
+                    ThingWithComps ps = carried(pistol);
+                    if (ps != null && dockie.equipment?.Primary?.def != pistol)
+                    {
+                        WeaponAssingment.equipSpecificWeaponFromInventory(dockie, ps, dropCurrent: false, intentionalDrop: false);
+                    }
+                    p4HeldPistol = dockie.equipment?.Primary?.def == pistol;
+                    CESimpleSidearmsCompat.Loadouts.Patches.JobGiver_UpdateLoadout_TryGiveJob_Patch.Reconcile(dockie);
+                    p4PrimaryAfter = dockie.equipment?.Primary?.def;
+                },
+                checks =
+                {
+                    State(dockie, () => loadout),
+                    P("feature-managed", () =>
+                        (CESimpleSidearmsCompat.Loadouts.Patches.PlayerIntent.ManagedPawn(dockie), "adHoc=" + loadout.adHoc)),
+                    C("index0-is-dry", () => (p4Index0Dry, "index0Dry=" + p4Index0Dry)),
+                    C("held-pistol", () => (p4HeldPistol, "heldPistol=" + p4HeldPistol)),
+                    C("dry-index0-not-taken", () =>
+                        (p4PrimaryAfter == pistol, "primaryAfter=" + (p4PrimaryAfter?.defName ?? "null"))),
+                },
+            });
+
+            return phases;
+        }
+
+        // Mirror of the production HasUsableAmmo, for the dry precondition only.
+        private static bool HasUsableAmmoProbe(ThingWithComps gun, Pawn pawn)
+        {
+            if (gun == null) { return false; }
+            var ammo = gun.TryGetComp<CombatExtended.CompAmmoUser>();
+            if (ammo == null || !ammo.UseAmmo) { return true; }
+            if (ammo.CurMagCount > 0) { return true; }
+            var inv = pawn.TryGetComp<CombatExtended.CompInventory>();
+            return inv != null && ammo.SelectedAmmo != null && inv.AmmoCountOfDef(ammo.SelectedAmmo) > 0;
         }
 
         // -- shared helpers --

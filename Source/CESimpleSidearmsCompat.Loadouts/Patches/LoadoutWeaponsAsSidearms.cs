@@ -172,8 +172,45 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             Apply(memory, rec, target, forced, forcedDrafted);
             AssertRoles(pawn, memory, rec, declared, target, forced);
 
-            // Re-arm a carried loadout weapon if unarmed.
-            TryReArmFromLoadout(pawn);
+            // Unarmed: re-arm a carried loadout weapon. Armed with a lower-priority loadout gun:
+            // drift back to the index-0 gun when it is usable (undrafted, the pawn returns to its
+            // loadout primary after a combat swap). Never a hand-equipped non-loadout primary
+            // (declared.Contains) or a forced weapon; a dry index-0 leaves the held gun as-is.
+            if (!TryReArmFromLoadout(pawn) && pawn.equipment?.Primary is ThingWithComps held
+                && declared.Count > 0 && held.def != declared[0] && declared.Contains(held.def)
+                && !memory.IsCurrentWeaponForced(alsoCountPreferredOrDefault: false))
+            {
+                ThingWithComps top = pawn.GetCarriedWeapons(includeEquipped: false, includeTools: false)
+                    .FirstOrDefault(w => w.def == declared[0]
+                        && !rec.dontEquip.Contains(w.toThingDefStuffDefPair())
+                        && memory.RememberedWeapons.Contains(w.toThingDefStuffDefPair())
+                        && HasUsableAmmo(w, pawn));
+                if (top != null)
+                {
+                    WeaponAssingment.equipSpecificWeaponFromInventory(pawn, top,
+                        dropCurrent: false, intentionalDrop: false);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether the pawn can fire this gun now or reload it: loaded, or carrying a round of the
+        /// ammo type CE would actually load (its selected type), or a weapon with no ammo system.
+        /// </summary>
+        private static bool HasUsableAmmo(ThingWithComps gun, Pawn pawn)
+        {
+            CompAmmoUser ammo = gun.TryGetComp<CompAmmoUser>();
+            if (ammo == null || !ammo.UseAmmo)
+            {
+                return true;
+            }
+            if (ammo.CurMagCount > 0)
+            {
+                return true;
+            }
+            CompInventory inv = pawn.TryGetComp<CompInventory>();
+            return inv != null && ammo.SelectedAmmo != null
+                   && inv.AmmoCountOfDef(ammo.SelectedAmmo) > 0;
         }
 
         /// <summary>
