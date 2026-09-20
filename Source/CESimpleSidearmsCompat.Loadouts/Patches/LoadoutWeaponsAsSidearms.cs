@@ -83,13 +83,10 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                     return;
                 }
                 bool excluded = rec.dontEquip.Contains(weapon.toThingDefStuffDefPair());
-                // The player holds a hand-equipped index-0 primary: don't let CE retake the primary
-                // slot by equipping a loadout weapon the pawn lacks - fetch it as a sidearm instead,
-                // so the grabbed gun stays primary and the loadout weapon rides along (the list model).
-                Loadout lo = pawn.GetLoadout();
+                // Fetch the loadout weapon as a sidearm instead of primary if pawn has manually
+                // equipped non-loadout primary.
                 bool displacesPlayerPrimary = rec.playerPrimary != null
-                    && lo != null && !lo.defaultLoadout
-                    && lo.Slots.Any(s => s.thingDef == weapon.def);
+                    && CompLoadoutSidearms.IsLoadoutWeapon(pawn.GetLoadout(), weapon.def);
                 if (!excluded && !displacesPlayerPrimary)
                 {
                     return;

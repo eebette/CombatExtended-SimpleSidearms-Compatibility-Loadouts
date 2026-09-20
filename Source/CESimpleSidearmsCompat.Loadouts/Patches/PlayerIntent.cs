@@ -715,9 +715,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             {
                 return;
             }
-            // Withdraw a prior exclusion + role veto when the player re-equips something they had
-            // excluded. A no-op for a weapon that was never excluded (must not early-return here, or
-            // the index-0 tracking and remember below are skipped for a fresh hand-grab).
+            // Withdraw a prior exclusion + role veto when the player re-equips excluded weapon.
             if (rec.dontEquip.Remove(new ThingDefStuffDefPair(newEq.def, newEq.Stuff)))
             {
                 if (newEq.def.IsRangedWeapon)
@@ -729,13 +727,9 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                     rec.meleeRoleVetoed = false;
                 }
             }
-            // The list's index-0 pick: a hand-equipped non-loadout weapon becomes the player
-            // primary, so CE's loadout weapons ride along as sidearms rather than retaking the slot
-            // (see JobGiver_UpdateLoadout_TryGiveJob_Patch). Equipping a loadout weapon hands the
-            // slot back to the loadout.
-            Loadout lo = pawn.GetLoadout();
-            bool isLoadoutWeapon = lo != null && !lo.defaultLoadout
-                && lo.Slots.Any(s => s.thingDef == newEq.def);
+            // Set the index-0 marker: a non-loadout hand-equip is the player primary (loadout guns
+            // then ride as sidearms); equipping a loadout weapon hands the slot back (null marker).
+            bool isLoadoutWeapon = CompLoadoutSidearms.IsLoadoutWeapon(pawn.GetLoadout(), newEq.def);
             rec.playerPrimary = isLoadoutWeapon ? (ThingDefStuffDefPair?)null : newEq.toThingDefStuffDefPair();
             // Remember the hand-equipped weapon so the reconcile keeps it as a carried sidearm.
             CompSidearmMemory memory = CompSidearmMemory.GetMemoryCompForPawn(pawn);

@@ -30,10 +30,7 @@ namespace CESimpleSidearmsCompat.Loadouts
         public List<ThingDefStuffDefPair> dontEquip = new List<ThingDefStuffDefPair>();
 
         /// <summary>
-        /// The player's hand-equipped primary that is not a loadout weapon - the list's index-0
-        /// pick. While set, a loadout weapon the pawn lacks is fetched as a sidearm instead of
-        /// retaking the primary slot. Cleared when the player equips a loadout weapon (hands the
-        /// slot back to the loadout) or the loadout assignment changes.
+        /// The player's hand-equipped primary that is not a loadout weapon.
         /// </summary>
         public ThingDefStuffDefPair? playerPrimary;
 
@@ -74,6 +71,13 @@ namespace CESimpleSidearmsCompat.Loadouts
         public static CompLoadoutSidearms For(Pawn pawn)
         {
             return pawn?.TryGetComp<CompLoadoutSidearms>();
+        }
+
+        /// <summary>Whether the def is a weapon in the pawn's real (non-default) loadout.</summary>
+        public static bool IsLoadoutWeapon(Loadout loadout, ThingDef def)
+        {
+            return loadout != null && !loadout.defaultLoadout
+                   && loadout.Slots.Any(s => s.thingDef == def);
         }
 
         /// <summary>
