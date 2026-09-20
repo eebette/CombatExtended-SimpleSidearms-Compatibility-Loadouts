@@ -696,13 +696,9 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
             Verse.AI.Job curJob = pawn.CurJob;
             bool playerContext = PlayerIntent.PlayerChoosing
                 || (!pawn.Spawned && RimWorld.Planet.CaravanUtility.GetCaravan(pawn) != null)
-                // A hand-issued map "Equip" order (right-click a weapon on the ground) is player
-                // intent too: it runs as a playerForced JobDefOf.Equip with no choice-surface scope.
-                // Equip is a Core def, always present.
+                // Hand-issued map "Equip" order.
                 || (curJob != null && curJob.def == JobDefOf.Equip && curJob.playerForced)
-                // The def is DLC content and its DefOf field is null without it so the def
-                // must be checked first or this dereferences a null CurJob inside every
-                // think-tree equip.
+                // Player equipped from an Ideology outfit stand.
                 || (JobDefOf.UseOutfitStand != null && curJob != null
                     && curJob.def == JobDefOf.UseOutfitStand && curJob.playerForced);
             if (!playerContext || !PlayerIntent.ManagedPawn(pawn))
@@ -727,8 +723,7 @@ namespace CESimpleSidearmsCompat.Loadouts.Patches
                     rec.meleeRoleVetoed = false;
                 }
             }
-            // Set the index-0 marker: a non-loadout hand-equip is the player primary (loadout guns
-            // then ride as sidearms); equipping a loadout weapon hands the slot back (null marker).
+            // Set the primary weapon flag.
             bool isLoadoutWeapon = CompLoadoutSidearms.IsLoadoutWeapon(pawn.GetLoadout(), newEq.def);
             rec.playerPrimary = isLoadoutWeapon ? (ThingDefStuffDefPair?)null : newEq.toThingDefStuffDefPair();
             // Remember the hand-equipped weapon so the reconcile keeps it as a carried sidearm.
