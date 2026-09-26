@@ -43,7 +43,7 @@ in these instead.
 <tr><th width="300">Mod</th><th width="540">What it does</th></tr>
 <tr><td width="300"><a href="https://github.com/eebette/Better-Attack-Orders-for-Simple-Sidearms"><img src="Media/Badge_BAO.png" width="300" alt="Better Attack Orders for Simple Sidearms"></a></td><td width="540">Adds sidearm attack orders to the right-click target menu.</td></tr>
 <tr><td width="300"><a href="https://github.com/eebette/Pawns-Optimize-Weapon-Quality"><img src="Media/Badge_POWQ.png" width="300" alt="Pawns Optimize Weapon Quality"></a></td><td width="540">Pawns will upgrade their held guns when a higher-quality copy is available.</td></tr>
-<tr><td width="300"><a href="https://github.com/eebette/Universal-Patch-for-More-Materials"><img src="Media/Badge_UPMM.png" width="300" alt="Universal Patch for More Materials"></a></td><td width="540">Adds materials from <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3055040889">More Materials</a> to non-vanilla recipes.</td></tr>
+<tr><td width="300"><a href="https://github.com/eebette/More-Mod-Patches-for-Expanded-Materials-Metals"><img src="Media/Badge_MMP.png" width="300" alt="Expanded Materials - Metals: Mod Patches"></a></td><td width="540">Extends <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3333419387">Expanded Materials - Metals</a> to modded buildings it doesn't cover.</td></tr>
 </table>
 
 ## FAQ
